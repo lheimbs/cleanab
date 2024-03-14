@@ -1,3 +1,4 @@
+import json
 import pickle
 
 from pydantic import BaseModel, HttpUrl, constr, validator
@@ -39,6 +40,10 @@ class AccountConfig(BaseModel):
         return CACHE_HOME / f"{self.iban}.pickle"
 
     @property
+    def _cleaned_account_cache_filename(self):
+        return CACHE_HOME / f"{self.iban}_cleaned.json"
+
+    @property
     def has_account_cache(self):
         return self._account_cache_filename.is_file()
 
@@ -52,6 +57,11 @@ class AccountConfig(BaseModel):
         CACHE_HOME.mkdir(parents=True, exist_ok=True)
         with open(self._account_cache_filename, "wb") as f:
             pickle.dump(transactions, f)
+
+    def write_cleaned_account_cache(self, transactions):
+        CACHE_HOME.mkdir(parents=True, exist_ok=True)
+        with open(self._cleaned_account_cache_filename, "w") as f:
+            json.dump(transactions, f)
 
     def read_account_cache(self):
         with open(self._account_cache_filename, "rb") as f:

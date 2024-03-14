@@ -17,11 +17,12 @@ TODAY = date.today()
 class Cleanab:
     app_connection: BaseApp
 
-    def __init__(self, *, config, dry_run=False, test=False, verbose=False):
+    def __init__(self, *, config, dry_run=False, test=False, verbose=False, save=False):
         self.config = config
         self.dry_run = dry_run
         self.test = test
         self.verbose = verbose
+        self.save = save
 
         if self.test:
             self.dry_run = True
@@ -87,6 +88,10 @@ class Cleanab:
                     )
                 )
             logger.info(f"Got {len(processed_transactions)} new transactions")
+
+            if self.save:
+                account.write_cleaned_account_cache(processed_transactions)
+
             return processed_transactions
         except Exception:
             logger.exception("Processing %s failed", account)

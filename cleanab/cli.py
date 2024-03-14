@@ -30,6 +30,16 @@ class ConfigFile(click.File):
     ),
 )
 @click.option(
+    "-s",
+    "--save",
+    is_flag=True,
+    help=(
+        "Save the cleaned transactions to disk. This is useful for debugging and"
+        " testing. It allows you to inspect the cleaned data before it is added to your"
+        " budgeting app."
+    ),
+)
+@click.option(
     "-t",
     "--test",
     is_flag=True,
