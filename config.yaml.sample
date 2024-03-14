@@ -3,6 +3,9 @@ timespan:
   earliest_date: "2019-06-01"
   maximum_days: 30
 
+cleanab:
+  fints_product_id: "<enter your product id or use one from another app ;) >"
+
 apps:
   ynab5:
     access_token: ""

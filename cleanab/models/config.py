@@ -20,6 +20,7 @@ class CleanabConfig(BaseModel):
     concurrency: Annotated[int, Field(gt=0)] = 1
     minimum_holdings_delta: Annotated[float, Field(ge=0)] = 1
     debug: bool = False
+    fints_product_id: str | None = None
 
 
 NestedReplacementEntry = List[Union[ReplacementDefinition, str]]

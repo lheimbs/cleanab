@@ -58,6 +58,7 @@ class Cleanab:
                 account,
                 earliest=self.earliest,
                 latest=TODAY,
+                product_id=self.config.cleanab.fints_product_id,
             )
             account.write_account_cache(raw_transactions)
         return raw_transactions
