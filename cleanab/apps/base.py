@@ -1,6 +1,28 @@
 from abc import ABC, abstractmethod
 from importlib import import_module
-from typing import List, Tuple
+from typing import Dict, List, Tuple
+
+from pydantic import BaseModel
+
+
+class BaseAppConfig(BaseModel):
+    @classmethod
+    def __get_validators__(cls):
+        yield cls._import_app_
+
+    @classmethod
+    def _import_app_(cls, data: Dict):
+        module_name = data.pop("module")
+        try:
+            module_path = "cleanab.apps." + module_name
+            module = import_module(module_path)
+            return module.Config(**data)
+        except ModuleNotFoundError:
+            raise ValueError(f"Unknown app: {module_name}")
+
+    @classmethod
+    def parse_obj(cls, obj):
+        return cls._import_app_(obj)
 
 
 class BaseApp(ABC):
@@ -12,7 +34,12 @@ class BaseApp(ABC):
     def augment_transaction(self, transaction, account):
         pass
 
+    @abstractmethod
+    def create_intermediary(self, transactions: list[None]) -> str:
+        return ""
 
-def load_app(module_name):
+
+def load_app(app_name: str, config: BaseAppConfig) -> BaseApp:
+    module_name = f"cleanab.apps.{app_name.lower()}"
     module = import_module(module_name)
-    return module.App, module.Config
+    return module.App(config)

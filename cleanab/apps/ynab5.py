@@ -1,6 +1,5 @@
 from uuid import UUID
 
-from pydantic import BaseModel
 from ynab_api.api_client import ApiClient
 from ynab_api.apis import AccountsApi, TransactionsApi
 from ynab_api.configuration import Configuration
@@ -8,12 +7,12 @@ from ynab_api.model.save_transaction import SaveTransaction
 from ynab_api.model.save_transactions_wrapper import SaveTransactionsWrapper
 
 from ..models import AccountConfig, FintsTransaction
-from .base import BaseApp
+from .base import BaseApp, BaseAppConfig
 
 API_URL = "https://api.youneedabudget.com/v1"
 
 
-class NewYnabConfig(BaseModel):
+class NewYnabConfig(BaseAppConfig):
     access_token: str
     budget_id: UUID
 

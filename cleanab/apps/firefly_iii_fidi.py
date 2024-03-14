@@ -6,10 +6,10 @@ from io import StringIO
 
 import requests
 from logzero import logger
-from pydantic import AnyHttpUrl, BaseModel
+from pydantic import AnyHttpUrl
 
 from ..models import AccountConfig, FintsTransaction
-from .base import BaseApp
+from .base import BaseApp, BaseAppConfig
 
 _firefly_iii_data_importer_base_config = {
     "version": 3,
@@ -48,7 +48,7 @@ _firefly_iii_data_importer_base_config = {
 }
 
 
-class FireFlyIIIAppConfig(BaseModel):
+class FireFlyIIIAppConfig(BaseAppConfig):
     fidi_url: AnyHttpUrl
     default_account_id: int
     auto_import_secret: str
