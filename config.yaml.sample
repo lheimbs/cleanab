@@ -3,10 +3,16 @@ timespan:
   earliest_date: "2019-06-01"
   maximum_days: 30
 
-ynab:
-  access_token: ""
-  budget_id: ""
-  cash_account_id: ""
+apps:
+  ynab5:
+    access_token: ""
+    budget_id: ""
+    cash_account_id: ""
+  # firefly_iii_fidi:
+  #   fidi_url
+  #   default_account_id
+  #   auto_import_secret
+  #   personal_access_token
 
 accounts:
   - friendly_name: This Bank Account
