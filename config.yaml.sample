@@ -16,6 +16,11 @@ apps:
   #   default_account_id
   #   auto_import_secret
   #   personal_access_token
+  # actual:
+  #   actual_api_url
+  #   actual_api_key
+  #   actual_sync_id
+  #   actual_account_id
 
 accounts:
   - friendly_name: This Bank Account
