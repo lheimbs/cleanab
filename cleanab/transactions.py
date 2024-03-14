@@ -42,10 +42,16 @@ def process_transaction(transaction, cleaner):
     if purpose and len(purpose) > 200:
         purpose = purpose[:200]
 
+    applicant_name = local_data.get("applicant_name")
+    if not applicant_name:
+        logger.warning("No applicant name found")
+        applicant_name = "Unknown"
+
     return FintsTransaction(
         date=entry_date,
         amount=amount,
-        applicant_name=local_data["applicant_name"],
+        # applicant_name=local_data["applicant_name"],
+        applicant_name=applicant_name,
         purpose=purpose,
         import_id=import_id,
     )
@@ -54,6 +60,8 @@ def process_transaction(transaction, cleaner):
 def echo_if_changed(original_data, data, *, cleaner, import_id):
     logger.debug("---")
     logger.debug("Transaction %s", import_id)
+
+    logger.debug(f"Original: {original_data}")
 
     for field in cleaner.fields:
         previous = original_data.get(field, "") or ""
