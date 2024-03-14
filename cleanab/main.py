@@ -3,7 +3,8 @@ from itertools import chain
 
 from logzero import logger
 
-from .apps.base import BaseApp, load_app
+from cleanab.models.config import Config
+
 from .cleaner import FieldCleaner
 from .fints import process_fints_account
 from .holdings import process_holdings
@@ -15,9 +16,8 @@ TODAY = date.today()
 
 
 class Cleanab:
-    app_connection: BaseApp
 
-    def __init__(self, *, config, dry_run=False, test=False, verbose=False, save=False):
+    def __init__(self, *, config: Config, dry_run=False, test=False, verbose=False, save=False):
         self.config = config
         self.dry_run = dry_run
         self.test = test
@@ -28,14 +28,13 @@ class Cleanab:
             self.dry_run = True
             self.verbose = True
 
-    def setup_app_connection(self):
-        App, Config = load_app(self.config.app_module)
-        config = Config.parse_obj(self.config.app_config)
-        self.app_connection = App(config)
+    def setup_app_connections(self):
+        self.config.load_apps()
 
     def setup(self):
-        self.setup_app_connection()
-
+        self.setup_app_connections()
+        for app in self.config.apps.keys():
+            logger.info(f"Loaded App {app}")
         self.accounts = self.config.accounts
         logger.debug("Creating field cleaner instance")
         self.cleaner = FieldCleaner(
@@ -99,32 +98,35 @@ class Cleanab:
             return []
 
     def run(self):
-        processed_transactions = list(
-            chain.from_iterable(self.processor(account) for account in self.accounts)
-        )
+        processed_transactions = list(zip(
+            *chain.from_iterable(self.processor(account) for account in self.accounts)
+        ))
 
         if not processed_transactions:
             logger.warning("No transactions found")
             return
 
-        if self.dry_run:
-            logger.info("Dry-run, not creating transactions")
-            if intermediary := self.app_connection.create_intermediary(
-                processed_transactions
-            ):
-                logger.debug(f"Intermediary:\n\n{intermediary}\n\n")
+        for i, app_connection in enumerate(self.config.get_apps()):
+            transactions = processed_transactions[i]
+            if self.dry_run:
+                logger.info("Dry-run, not creating transactions")
+                if intermediary := app_connection.create_intermediary(
+                    transactions
+                ):
+                    logger.debug(f"{app_connection}: Intermediary:\n\n{intermediary}\n\n")
 
-            return
+                return
 
-        logger.info(f"Creating transactions in {self.app_connection}")
-        new, duplicates = self.app_connection.create_transactions(
-            processed_transactions
-        )
+            logger.info(f"Creating transactions in {app_connection}")
+            new, duplicates = app_connection.create_transactions(
+                transactions
+            )
 
-        logger.info(f"Created {len(new)} new transactions")
-        logger.info(f"Saw {len(duplicates)} duplicates")
+            logger.info(f"Created {new} new transactions")
+            logger.info(f"Saw {duplicates} duplicates")
 
     def process_account_transactions(self, transactions: list, account: AccountConfig):
+        apps = self.config.get_apps()
         for transaction in transactions:
             if not transaction:
                 continue
@@ -133,6 +135,8 @@ class Cleanab:
             if not processed_transaction:
                 continue
 
-            yield self.app_connection.augment_transaction(
-                processed_transaction, account
-            )
+            agumented_transaction = [
+                app.augment_transaction(processed_transaction, account)
+                for app in apps
+            ]
+            yield agumented_transaction
