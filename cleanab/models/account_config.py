@@ -1,7 +1,8 @@
 import json
 import pickle
+from typing import Annotated
 
-from pydantic import BaseModel, HttpUrl, constr, validator
+from pydantic import field_validator, BaseModel, HttpUrl, StringConstraints
 
 from ..utils import CACHE_HOME
 from ..validators import is_iban
@@ -14,7 +15,10 @@ class AccountConfig(BaseModel):
 
     fints_username: str
     fints_password: str
-    fints_blz: constr(regex=r"^\d+$")  # noqa: F722
+    fints_blz: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, pattern=r"^\d+$"),
+    ]
     fints_endpoint: HttpUrl
 
     friendly_name: str
@@ -47,7 +51,8 @@ class AccountConfig(BaseModel):
     def has_account_cache(self):
         return self._account_cache_filename.is_file()
 
-    @validator("iban")
+    @field_validator("iban")
+    @classmethod
     def iban_valid(cls, v):
         if not is_iban(v):
             raise ValueError("Not a valid IBAN")

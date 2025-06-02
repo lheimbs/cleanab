@@ -65,10 +65,16 @@ def handle_tan_response(fints: FinTS3PinTanClient, tan_response: NeedTANResponse
     else:
         logger.info(tan_response.challenge_html)
 
-    tan = input("Please enter the TAN: ")
+    tan: str = input("Please enter the TAN: ")
 
     try:
-        return fints.send_tan(tan_response, tan)
+        response = fints.send_tan(tan_response, tan)
+        if isinstance(response, NeedTANResponse):
+            logger.error("TAN was not accepted, please try again.")
+            return handle_tan_response(fints, response)
+        else:
+            logger.info("TAN accepted, proceeding with the request.")
+            return response
     except Exception as e:
         logger.error(f"Failed to send TAN: {e}")
         return []
@@ -99,7 +105,7 @@ def retrieve_holdings(sepa_account, fints: FinTS3PinTanClient):
 @lru_cache(maxsize=8)
 def get_fints_client(blz, username, password, endpoint, product_id):
     logger.info("Retrieving SEPA accounts for %s from %s", username, endpoint)
-    fints = FinTS3PinTanClient(blz, username, password, endpoint, product_id)
+    fints = FinTS3PinTanClient(bank_identifier=blz, user_id=username, pin=password, server=endpoint, product_id=product_id)
     with lock:
         sepa_accounts = fints.get_sepa_accounts()
 

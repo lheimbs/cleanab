@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Annotated, Dict, List, Union
 
-from pydantic import BaseModel, Extra, Field, root_validator
+from pydantic import model_validator, ConfigDict, BaseModel, Field
 from pydantic.main import create_model
 
 from cleanab.apps.base import BaseApp, BaseAppConfig, load_app
@@ -12,7 +12,7 @@ from .cleaner import FinalizerDefinition, ReplacementDefinition
 
 
 class TimespanConfig(BaseModel):
-    earliest_date = date(2000, 1, 1)
+    earliest_date: date = date(2000, 1, 1)
     maximum_days: Annotated[int, Field(ge=1)] = 30
 
 
@@ -32,7 +32,7 @@ FullReplacementEntry = List[
     ]
 ]
 
-ReplacementFields = create_model(
+ReplacementFields: type[BaseModel] = create_model(
     "ReplacementFields",
     **{field: (FullReplacementEntry, []) for field in FIELDS_TO_CLEAN_UP}   # type: ignore
 )
@@ -48,19 +48,18 @@ FinalizerFields = create_model(
 
 
 class Config(BaseModel):
-    cleanab = CleanabConfig()
-    timespan = TimespanConfig()
-    accounts: Annotated[list[AccountConfig], Field(min_items=1)]
-    replacements = ReplacementFields()
-    pre_replacements = ReplacementFields()
-    finalizer = FinalizerFields()
+    cleanab: CleanabConfig = CleanabConfig()
+    timespan: TimespanConfig = TimespanConfig()
+    accounts: Annotated[list[AccountConfig], Field(min_length=1)]
+    replacements: BaseModel = ReplacementFields()
+    pre_replacements: BaseModel = ReplacementFields()
+    finalizer: BaseModel = FinalizerFields()
     apps: Dict[str, BaseAppConfig] = {}
     _parsed_apps: list[BaseApp] = []
+    model_config: ConfigDict = ConfigDict(extra="allow")
 
-    class Config:
-        extra = Extra.allow
-
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def add_type_key(cls, values):
         apps = values.get('apps', {})
         for key in apps.keys():

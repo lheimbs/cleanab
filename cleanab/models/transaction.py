@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import BaseModel, validator
+from pydantic import field_validator, BaseModel
 
 
 class FintsTransaction(BaseModel):
@@ -10,6 +10,7 @@ class FintsTransaction(BaseModel):
     purpose: str = ""
     import_id: str = ""
 
-    @validator("purpose", pre=True)
+    @field_validator("purpose", mode="before")
+    @classmethod
     def set_purpose_empty(cls, purpose):
         return purpose or ""

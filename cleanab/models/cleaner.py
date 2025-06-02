@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Dict
 
-from pydantic import BaseModel, Extra
+from pydantic import ConfigDict, BaseModel
 
 from .. import utils
 
@@ -22,10 +22,7 @@ class ReplacementDefinition(BaseModel):
         __dict = self.__dict__.copy()
         transform = tuple(__dict.pop("transform").items())
         return hash(self.__class__) + hash(tuple(__dict.values())) + hash(transform)
-
-    class Config:
-        frozen = True
-        extra = Extra.forbid
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     def get_cleaner(self):
         return utils.regex_sub_instance(self)
@@ -34,6 +31,4 @@ class ReplacementDefinition(BaseModel):
 class FinalizerDefinition(BaseModel):
     capitalize: bool = True
     strip: bool = True
-
-    class Config:
-        frozen = True
+    model_config = ConfigDict(frozen=True)
