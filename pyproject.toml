@@ -1,29 +1,31 @@
-[tool.poetry]
+[project]
 name = "cleanab"
 version = "0.1.0"
-description = "Fetch and clean FinTS/HBCI transactions and push them to YNAB"
-authors = ["Jan Willhaus <mail@janwillhaus.de>"]
+description = "Fetch and clean FinTS/HBCI transactions and push them to connected apps"
+authors = [{ name = "Jan Willhaus", email = "mail@janwillhaus.de" }]
+requires-python = ">=3.10"
 license = "Apache-2.0"
+dependencies = [
+    "fints>=3.1",
+    "pyyaml>= 6.0.1",
+    "logzero>=1.7.0,<2",
+    "click>=8.0",
+    "ynab-api",
+    "pydantic>=1.10.2",
+    "pillow>=11.2.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-fints = "^3.1"
-pyyaml = ">= 6.0.1"
-logzero = "^1.7.0"
-click = "^8.0"
-ynab-api = {git = "https://github.com/dmlerner/ynab-api"}
-pydantic = "^1.10.2"
-pillow = "^10.2.0"
+[project.scripts]
+pycleanab = "cleanab.main:main"
 
-[tool.poetry.dev-dependencies]
-black = "^22.8.0"
+[dependency-groups]
+dev = ["black>=22.8.0,<23"]
 
-[tool.poetry.scripts]
-pycleanab = 'cleanab.main:main'
+[tool.uv]
+
+[tool.uv.sources]
+ynab-api = { git = "https://github.com/dmlerner/ynab-api" }
 
 [tool.isort]
 profile = "black"
 
-[build-system]
-requires = ["poetry>=0.12"]
-build-backend = "poetry.masonry.api"
