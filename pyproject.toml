@@ -6,7 +6,7 @@ authors = [{ name = "Jan Willhaus", email = "mail@janwillhaus.de" }]
 requires-python = ">=3.10"
 license = "Apache-2.0"
 dependencies = [
-    "fints>=3.1",
+    "fints>=4",
     "pyyaml>= 6.0.1",
     "logzero>=1.7.0,<2",
     "click>=8.0",
@@ -28,4 +28,3 @@ ynab-api = { git = "https://github.com/dmlerner/ynab-api" }
 
 [tool.isort]
 profile = "black"
-
