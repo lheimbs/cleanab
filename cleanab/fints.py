@@ -104,10 +104,21 @@ def retrieve_holdings(sepa_account, fints: FinTS3PinTanClient):
 
 @lru_cache(maxsize=8)
 def get_fints_client(blz, username, password, endpoint, product_id):
-    logger.info("Retrieving SEPA accounts for %s from %s", username, endpoint)
+    logger.info("Retrieving SEPA accounts for %s from %s (product id=%s)", username, endpoint, product_id)
     fints = FinTS3PinTanClient(bank_identifier=blz, user_id=username, pin=password, server=endpoint, product_id=product_id)
     with lock:
-        sepa_accounts = fints.get_sepa_accounts()
+        with fints:
+            # Bootstrap the client to set up TAN mechanisms
+            bootstrap_fints(fints)
+            
+            # Handle potential TAN requirement for dialog initialization
+            while isinstance(fints.init_tan_response, NeedTANResponse):
+                handle_tan_response(fints, fints.init_tan_response)
+            
+            # Get SEPA accounts and handle potential TAN requirement
+            sepa_accounts = fints.get_sepa_accounts()
+            while isinstance(sepa_accounts, NeedTANResponse):
+                sepa_accounts = handle_tan_response(fints, sepa_accounts)
 
     return fints, sepa_accounts
 
