@@ -5,7 +5,7 @@ from io import BytesIO
 from multiprocessing import Lock
 import time
 
-from fints.client import FinTS3PinTanClient, NeedTANResponse
+from fints.client import FinTS3PinTanClient, FinTSClientError, NeedTANResponse
 from fints.hhd.flicker import terminal_flicker_unix
 from logzero import logger
 
@@ -84,7 +84,7 @@ def handle_tan_response(
         else:
             logger.info("TAN accepted, proceeding with the request.")
             return response
-    except Exception as e:
+    except FinTSClientError as e:
         logger.error(f"Failed to send TAN: {e}")
         return []
 
