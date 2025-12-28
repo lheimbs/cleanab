@@ -22,6 +22,7 @@ class ReplacementDefinition(BaseModel):
         __dict = self.__dict__.copy()
         transform = tuple(__dict.pop("transform").items())
         return hash(self.__class__) + hash(tuple(__dict.values())) + hash(transform)
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     def get_cleaner(self):

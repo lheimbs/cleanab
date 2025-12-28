@@ -16,8 +16,9 @@ TODAY = date.today()
 
 
 class Cleanab:
-
-    def __init__(self, *, config: Config, dry_run=False, test=False, verbose=False, save=False):
+    def __init__(
+        self, *, config: Config, dry_run=False, test=False, verbose=False, save=False
+    ):
         self.config = config
         self.dry_run = dry_run
         self.test = test
@@ -99,9 +100,13 @@ class Cleanab:
             return []
 
     def run(self):
-        processed_transactions = list(zip(
-            *chain.from_iterable(self.processor(account) for account in self.accounts)
-        ))
+        processed_transactions = list(
+            zip(
+                *chain.from_iterable(
+                    self.processor(account) for account in self.accounts
+                )
+            )
+        )
 
         if not processed_transactions:
             logger.warning("No transactions found")
@@ -111,17 +116,15 @@ class Cleanab:
             transactions = processed_transactions[i]
             if self.dry_run:
                 logger.info("Dry-run, not creating transactions")
-                if intermediary := app_connection.create_intermediary(
-                    transactions
-                ):
-                    logger.debug(f"{app_connection}: Intermediary:\n\n{intermediary}\n\n")
+                if intermediary := app_connection.create_intermediary(transactions):
+                    logger.debug(
+                        f"{app_connection}: Intermediary:\n\n{intermediary}\n\n"
+                    )
 
                 return
 
             logger.info(f"Creating transactions in {app_connection}")
-            new, duplicates = app_connection.create_transactions(
-                transactions
-            )
+            new, duplicates = app_connection.create_transactions(transactions)
 
             logger.info(f"Created {new} new transactions")
             logger.info(f"Saw {duplicates} duplicates")
@@ -137,7 +140,6 @@ class Cleanab:
                 continue
 
             agumented_transaction = [
-                app.augment_transaction(processed_transaction, account)
-                for app in apps
+                app.augment_transaction(processed_transaction, account) for app in apps
             ]
             yield agumented_transaction

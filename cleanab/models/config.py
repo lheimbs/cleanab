@@ -34,7 +34,7 @@ FullReplacementEntry = List[
 
 ReplacementFields: type[BaseModel] = create_model(
     "ReplacementFields",
-    **{field: (FullReplacementEntry, []) for field in FIELDS_TO_CLEAN_UP}   # type: ignore
+    **{field: (FullReplacementEntry, []) for field in FIELDS_TO_CLEAN_UP},  # type: ignore
 )
 
 
@@ -43,7 +43,7 @@ FinalizerFields = create_model(
     **{
         field: (FinalizerDefinition, FinalizerDefinition())
         for field in FIELDS_TO_CLEAN_UP
-    }   # type: ignore
+    },  # type: ignore
 )
 
 
@@ -61,16 +61,15 @@ class Config(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def add_type_key(cls, values):
-        apps = values.get('apps', {})
+        apps = values.get("apps", {})
         for key in apps.keys():
-            apps[key]['module'] = key
-        values['apps'] = apps
+            apps[key]["module"] = key
+        values["apps"] = apps
         return values
 
     def load_apps(self):
         self._parsed_apps = [
-            load_app(app_name, app_config)
-            for app_name, app_config in self.apps.items()
+            load_app(app_name, app_config) for app_name, app_config in self.apps.items()
         ]
 
     def get_apps(self) -> list[BaseApp]:

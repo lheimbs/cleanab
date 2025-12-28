@@ -1,4 +1,3 @@
-
 from decimal import Decimal
 import json
 from typing import Union
@@ -20,7 +19,6 @@ class ActualAppConfig(BaseAppConfig):
 
 
 class ActualApp(BaseApp):
-
     def __init__(self, config: ActualAppConfig) -> None:
         self.config = config
 
@@ -31,25 +29,27 @@ class ActualApp(BaseApp):
         return json.dumps(transactions, indent=2)
 
     def create_transactions(self, transactions):
-        url = self.config.actual_api_url.rstrip('/')
+        url = self.config.actual_api_url.rstrip("/")
         sync_id = self.config.actual_sync_id
         account_id = self.config.actual_account_id
         headers = {
             "x-api-key": self.config.actual_api_key,
-            "accept": "application/json"
+            "accept": "application/json",
         }
         if self.config.actual_encryption_password:
-            headers["budget-encryption-password"] = self.config.actual_encryption_password
+            headers["budget-encryption-password"] = (
+                self.config.actual_encryption_password
+            )
 
         # Send transactions in chunks of 100
         new, duplicates = [], []
         for i in range(0, len(transactions), 100):
-            chunk = transactions[i:i + 100]
+            chunk = transactions[i : i + 100]
 
             response = requests.post(
                 f"{url}/budgets/{sync_id}/accounts/{account_id}/transactions/import",
                 headers=headers,
-                json={"transactions": chunk}
+                json={"transactions": chunk},
             )
 
             if not response.ok:
@@ -58,8 +58,8 @@ class ActualApp(BaseApp):
 
             report = response.json()
             logger.info(f"Received import report:\n{report}")
-            new += report.get('added', [])
-            duplicates += report.get('updated', [])
+            new += report.get("added", [])
+            duplicates += report.get("updated", [])
         return new, duplicates
 
     def augment_transaction(
