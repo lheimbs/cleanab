@@ -1,10 +1,11 @@
 from datetime import date
-from typing import Annotated, Dict, List, Union
+from typing import Annotated
 
-from pydantic import model_validator, ConfigDict, BaseModel, Field
+from logzero import logger
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.main import create_model
 
-from cleanab.apps.base import BaseApp, BaseAppConfig, load_app
+from cleanab.apps.base import BaseApp, _AppConfigValidator, load_app
 
 from ..constants import FIELDS_TO_CLEAN_UP
 from .account_config import AccountConfig
@@ -23,13 +24,9 @@ class CleanabConfig(BaseModel):
     fints_product_id: str | None = None
 
 
-NestedReplacementEntry = List[Union[ReplacementDefinition, str]]
-FullReplacementEntry = List[
-    Union[
-        NestedReplacementEntry,
-        ReplacementDefinition,
-        str,
-    ]
+NestedReplacementEntry = list[ReplacementDefinition | str]
+FullReplacementEntry = list[
+    NestedReplacementEntry | ReplacementDefinition | str
 ]
 
 ReplacementFields: type[BaseModel] = create_model(
@@ -54,7 +51,7 @@ class Config(BaseModel):
     replacements: BaseModel = ReplacementFields()
     pre_replacements: BaseModel = ReplacementFields()
     finalizer: BaseModel = FinalizerFields()
-    apps: Dict[str, BaseAppConfig] = {}
+    apps: dict[str, _AppConfigValidator] = {}
     _parsed_apps: list[BaseApp] = []
     model_config: ConfigDict = ConfigDict(extra="allow")
 
@@ -63,11 +60,13 @@ class Config(BaseModel):
     def add_type_key(cls, values):
         apps = values.get("apps", {})
         for key in apps.keys():
-            apps[key]["module"] = key
+            if isinstance(apps[key], dict):
+                apps[key]["module"] = key
         values["apps"] = apps
         return values
 
     def load_apps(self):
+        logger.debug(f"Loading configured apps {self.apps}")
         self._parsed_apps = [
             load_app(app_name, app_config) for app_name, app_config in self.apps.items()
         ]

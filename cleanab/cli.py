@@ -16,7 +16,7 @@ class ConfigFile(click.File):
     def convert(self, value, param, ctx):
         value = super().convert(value, param, ctx)
         value = yaml.safe_load(value)
-        return Config.parse_obj(value)
+        return Config.model_validate(value)
 
 
 @click.command()

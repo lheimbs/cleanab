@@ -73,7 +73,7 @@ class FireFlyIIIApp(BaseApp):
     def _set_up_session(self):
         self._post = partial(
             requests.post,
-            f"{self.config.fidi_url.rstrip('/')}/autoupload",
+            f"{str(self.config.fidi_url).rstrip('/')}/autoupload",
             params={"secret": self.config.auto_import_secret},
         )
 
@@ -89,7 +89,7 @@ class FireFlyIIIApp(BaseApp):
     def __str__(self):
         return f"FireFly III FIDI at {self.config.fidi_url}"
 
-    def create_intermediary(self, transactions: list[dict]) -> str:
+    def create_intermediary(self, transactions: tuple) -> str:
         importable = StringIO()
         writer = csv.DictWriter(
             importable,

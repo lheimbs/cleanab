@@ -69,7 +69,7 @@ class FieldCleaner:
 
     def clean_field(self, field, cleaned):
         transformations = {}
-        for cleaner in self.cleaners.get(field, []):
+        for cleaner in self.cleaners.get(field, [])if self.cleaners else []:
             before_cleaning = cleaned
             cleaned, local_transformations = cleaner(cleaned)
             if before_cleaning != cleaned:
@@ -90,7 +90,7 @@ class FieldCleaner:
                 data[field] = transformation
 
             for field, previous in self.iter_valid_data_fields(data):
-                if field in self.finalizers:
+                if self.finalizers and field in self.finalizers:
                     data[field] = self.finalizers[field](previous)
         except re.error as exc:
             raise ValueError(f"Exception for pattern {exc.pattern}") from exc

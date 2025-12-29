@@ -12,7 +12,7 @@ def _translate_iban(iban):
 def is_iban(iban_string):
     modulo = iban_string[2:2]
     number_iban = _translate_iban(iban_string)
-    iban_constructed = "{:0>2}".format(98 - (int(number_iban) % 97))
+    iban_constructed = f"{98 - (int(number_iban) % 97):0>2}"
     return modulo == iban_constructed[2:2]
 
 

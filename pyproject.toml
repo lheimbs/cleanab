@@ -19,12 +19,24 @@ dependencies = [
 pycleanab = "cleanab.main:main"
 
 [dependency-groups]
-dev = ["black>=22.8.0,<23"]
+dev = ["ruff>=0.8.0"]
 
 [tool.uv]
 
 [tool.uv.sources]
 ynab-api = { git = "https://github.com/dmlerner/ynab-api" }
 
-[tool.isort]
-profile = "black"
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cleanab"]
+
+[tool.pylint.messages_control]
+disable = "all"

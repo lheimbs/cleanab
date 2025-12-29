@@ -1,7 +1,6 @@
 from enum import Enum
-from typing import Dict
 
-from pydantic import ConfigDict, BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from .. import utils
 
@@ -14,9 +13,9 @@ class FieldsEnum(str, Enum):
 class ReplacementDefinition(BaseModel):
     pattern: str
     repl: str = ""
-    caseinsensitive: bool = True
+    case_insensitive: bool = True
     regex: bool = True
-    transform: Dict[FieldsEnum, str] = {}
+    transform: dict[FieldsEnum, str] = {}
 
     def __hash__(self):
         __dict = self.__dict__.copy()

@@ -1,21 +1,20 @@
-from decimal import Decimal
 import json
-from typing import Union
+from decimal import Decimal
 
 import requests
-from pydantic import AnyHttpUrl
 from logzero import logger
+from pydantic import HttpUrl
 
 from ..models import AccountConfig, FintsTransaction
 from .base import BaseApp, BaseAppConfig
 
 
 class ActualAppConfig(BaseAppConfig):
-    actual_api_url: AnyHttpUrl
+    actual_api_url: HttpUrl
     actual_api_key: str
     actual_sync_id: str
     actual_account_id: str
-    actual_encryption_password: Union[str, None] = None
+    actual_encryption_password: str | None = None
 
 
 class ActualApp(BaseApp):
@@ -25,11 +24,11 @@ class ActualApp(BaseApp):
     def __str__(self):
         return "Actual App Connection"
 
-    def create_intermediary(self, transactions: list[dict]) -> str:
+    def create_intermediary(self, transactions: tuple) -> str:
         return json.dumps(transactions, indent=2)
 
     def create_transactions(self, transactions):
-        url = self.config.actual_api_url.rstrip("/")
+        url = str(self.config.actual_api_url).rstrip("/")
         sync_id = self.config.actual_sync_id
         account_id = self.config.actual_account_id
         headers = {

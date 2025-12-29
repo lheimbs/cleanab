@@ -1,6 +1,6 @@
 from datetime import date
 
-from pydantic import field_validator, BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class FintsTransaction(BaseModel):

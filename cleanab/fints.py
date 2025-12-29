@@ -1,14 +1,13 @@
 from __future__ import annotations
 
+import time
 from functools import lru_cache
 from io import BytesIO
 from multiprocessing import Lock
-import time
 
 from fints.client import FinTS3PinTanClient, FinTSClientError, NeedTANResponse
 from fints.hhd.flicker import terminal_flicker_unix
 from logzero import logger
-
 from PIL import Image
 
 from .models.enums import AccountType
@@ -26,7 +25,7 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
             logger.info("Multiple tan mechanisms available. Which one do you prefer?")
             for i, m in enumerate(mechanisms):
                 logger.info(
-                    i, "Function {p.security_function}: {p.name}".format(p=m[1])
+                    i, f"Function {m[1].security_function}: {m[1].name}"
                 )
             choice = input("Choice: ").strip()
             fints.set_tan_mechanism(mechanisms[int(choice)][0])
@@ -46,9 +45,8 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
             for i, tan_medium in enumerate(tan_media[1]):
                 logger.info(
                     i,
-                    "Medium {p.tan_medium_name}: Phone no. {p.mobile_number_masked}, Last used {p.last_use}".format(
-                        p=tan_medium
-                    ),
+                    f"Medium {tan_medium.tan_medium_name}: Phone no. {tan_medium.mobile_number_masked}, "
+                    f"Last used {tan_medium.last_use}",
                 )
             choice = input("Choice: ").strip()
             fints.set_tan_medium(tan_media[1][int(choice)])

@@ -71,6 +71,7 @@ class Cleanab:
             raw_transactions = self._get_fints_transactions(account)
 
             if account.account_type == AccountType.HOLDING:
+                # TODO: What to do here?
                 return []
                 processed_transactions = list(
                     process_holdings(
@@ -120,7 +121,6 @@ class Cleanab:
                     logger.debug(
                         f"{app_connection}: Intermediary:\n\n{intermediary}\n\n"
                     )
-
                 return
 
             logger.info(f"Creating transactions in {app_connection}")

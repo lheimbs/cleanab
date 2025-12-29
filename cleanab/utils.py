@@ -8,7 +8,7 @@ from cleanab.models.cleaner import ReplacementDefinition
 
 from . import constants
 
-re_wordsplits = re.compile(r"([^\s\-]+(\s|$))")
+re_word_splits = re.compile(r"([^\s\-]+(\s|$))")
 
 if sys.platform == "darwin":
     CACHE_HOME = Path("~/Library/Caches").expanduser() / constants.NAME
@@ -23,10 +23,10 @@ def _replace_capitalize(match):
 
 
 def capitalize_string(string):
-    return re_wordsplits.sub(_replace_capitalize, string)
+    return re_word_splits.sub(_replace_capitalize, string)
 
 
-@lru_cache()
+@lru_cache
 def simple_replace_instance(string, replacement=""):
     def replace(x):
         return x.replace(string, replacement), {}
@@ -34,14 +34,14 @@ def simple_replace_instance(string, replacement=""):
     return replace
 
 
-@lru_cache()
+@lru_cache
 def regex_sub_instance(entry: ReplacementDefinition):
     pattern = entry.pattern
     if not entry.regex:
         pattern = re.escape(pattern)
     regex = re.compile(
         pattern,
-        flags=re.IGNORECASE if entry.caseinsensitive else 0,
+        flags=re.IGNORECASE if entry.case_insensitive else 0,
     )
 
     def substitute(x):

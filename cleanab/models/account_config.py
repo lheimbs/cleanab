@@ -2,7 +2,7 @@ import json
 import pickle
 from typing import Annotated
 
-from pydantic import field_validator, BaseModel, HttpUrl, StringConstraints
+from pydantic import BaseModel, HttpUrl, StringConstraints, field_validator
 
 from ..utils import CACHE_HOME
 from ..validators import is_iban
