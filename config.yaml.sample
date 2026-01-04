@@ -20,7 +20,7 @@ apps:
   #   actual_api_url
   #   actual_api_key
   #   actual_sync_id
-  #   actual_account_id
+  #   actual_account_ids
 
 accounts:
   - friendly_name: This Bank Account

@@ -13,7 +13,7 @@ class ActualAppConfig(BaseAppConfig):
     actual_api_url: HttpUrl
     actual_api_key: str
     actual_sync_id: str
-    actual_account_id: str
+    actual_account_ids: list[str]
     actual_encryption_password: str | None = None
 
 
@@ -27,10 +27,17 @@ class ActualApp(BaseApp):
     def create_intermediary(self, transactions: tuple) -> str:
         return json.dumps(transactions, indent=2)
 
-    def create_transactions(self, transactions):
+    def create_transactions(self, transactions: list[dict]) -> tuple[list, list]:
+        """Create transactions in Actual.
+
+        Args:
+            transactions (list[dict]): Transactions to create in Actual.
+
+        Returns:
+            tuple[list, list]: A tuple containing lists of new and duplicate transactions.
+        """
         url = str(self.config.actual_api_url).rstrip("/")
         sync_id = self.config.actual_sync_id
-        account_id = self.config.actual_account_id
         headers = {
             "x-api-key": self.config.actual_api_key,
             "accept": "application/json",
@@ -40,36 +47,55 @@ class ActualApp(BaseApp):
                 self.config.actual_encryption_password
             )
 
+        # Each transaction has a key _account_id specifying the actual account id.
+        # We need to split the transactions by account id to assign them correctly.
+        transactions_by_account = {}
+        transaction: dict
+        for transaction in transactions:
+            account_id = transaction.pop("_account_id")
+            if account_id not in self.config.actual_account_ids:
+                logger.warning(
+                    f"Skipping transaction for unknown account id {account_id}"
+                )
+                continue
+            transactions_by_account.setdefault(account_id, []).append(transaction)
+
         # Send transactions in chunks of 100
         new, duplicates = [], []
-        for i in range(0, len(transactions), 100):
-            chunk = transactions[i : i + 100]
+        for account_id, transactions in transactions_by_account.items():
+            for i in range(0, len(transactions), 100):
+                chunk = transactions[i : i + 100]
 
-            response = requests.post(
-                f"{url}/budgets/{sync_id}/accounts/{account_id}/transactions/import",
-                headers=headers,
-                json={"transactions": chunk},
-            )
+                response = requests.post(
+                    f"{url}/budgets/{sync_id}/accounts/{account_id}/transactions/import",
+                    headers=headers,
+                    json={"transactions": chunk},
+                )
 
-            if not response.ok:
-                logger.error(f"Failed creating transactions: \n\n{response.text}")
-                return new, duplicates
+                if not response.ok:
+                    logger.error(f"Failed creating transactions: \n\n{response.text}")
+                    return new, duplicates
 
-            report = response.json()
-            logger.info(f"Received import report:\n{report}")
-            new += report.get("added", [])
-            duplicates += report.get("updated", [])
+                report = response.json().get('data', {})
+                logger.info(f"Received import report:\n{report}")
+                new += report.get("added", [])
+                duplicates += report.get("updated", [])
         return new, duplicates
+    
+    is_written_account = False
 
     def augment_transaction(
         self, transaction: FintsTransaction, account: AccountConfig
     ):
+        if not self.is_written_account:
+            logger.debug(f"Writing transactions to account {account}")
+            self.is_written_account = True
         payee_name = transaction.applicant_name
         if len(payee_name) > 50:
             payee_name = payee_name[:50]
 
         return {
-            "account": self.config.actual_account_id,
+            "_account_id": account.per_app_id,
             "date": transaction.date.isoformat(),
             "payee_name": transaction.applicant_name or "Unnamed",
             "imported_payee": transaction.applicant_name or "Unnamed",
