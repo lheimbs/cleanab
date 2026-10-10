@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.10"
 
 [[package]]
@@ -104,6 +104,7 @@ dependencies = [
     { name = "pillow" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "ynab-api" },
 ]
 
@@ -118,8 +119,9 @@ requires-dist = [
     { name = "fints", specifier = ">=4" },
     { name = "logzero", specifier = ">=1.7.0,<2" },
     { name = "pillow", specifier = ">=11.2.0" },
-    { name = "pydantic", specifier = ">=1.10.2" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "requests", specifier = ">=2.28" },
     { name = "ynab-api", git = "https://github.com/dmlerner/ynab-api" },
 ]
 
