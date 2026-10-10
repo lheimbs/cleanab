@@ -7,7 +7,6 @@ from cleanab.models.config import Config
 
 from .cleaner import FieldCleaner
 from .fints import process_fints_account
-from .holdings import process_holdings
 from .models import AccountConfig
 from .models.enums import AccountType
 from .transactions import process_transaction
@@ -67,27 +66,17 @@ class Cleanab:
         logger.info(f"Processing {account}")
 
         try:
-            raw_transactions = self._get_fints_transactions(account)
-
             if account.account_type == AccountType.HOLDING:
-                # TODO: What to do here?
+                logger.warning(f"Holding accounts are not supported yet, skipping {account}")
                 return []
-                processed_transactions = list(
-                    process_holdings(
-                        account,
-                        raw_transactions,
-                        self.accounts_api,
-                        self.budget_id,
-                        min_delta=self.config.cleanab.minimum_holdings_delta,
-                    )
+
+            raw_transactions = self._get_fints_transactions(account)
+            processed_transactions = list(
+                self.process_account_transactions(
+                    raw_transactions,
+                    account,
                 )
-            else:
-                processed_transactions = list(
-                    self.process_account_transactions(
-                        raw_transactions,
-                        account,
-                    )
-                )
+            )
             logger.info(f"Got {len(processed_transactions)} new transactions")
 
             if self.save:
