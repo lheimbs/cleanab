@@ -123,9 +123,7 @@ class FireFlyIIIApp(BaseApp):
 
         return [], []
 
-    def augment_transaction(
-        self, transaction: FintsTransaction, account: AccountConfig
-    ):
+    def augment_transaction(self, transaction: FintsTransaction, account: AccountConfig):
         payee_name = transaction.applicant_name
         if len(payee_name) > 50:
             payee_name = payee_name[:50]

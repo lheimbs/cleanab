@@ -20,14 +20,14 @@ apps:
   #   actual_api_url
   #   actual_api_key
   #   actual_sync_id
-  #   actual_account_ids
+  #   actual_account_ids  # list of Actual account ids
 
 accounts:
   - friendly_name: This Bank Account
     iban:
-    ynab_id: ""
-    username: ""
-    password:
+    per_app_id: ""
+    fints_username: ""
+    fints_password: ""
     fints_blz: ""
     fints_endpoint: https://fints.ing-diba.de/fints/
     account_type: checking

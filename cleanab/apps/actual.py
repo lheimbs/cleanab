@@ -8,6 +8,8 @@ from pydantic import HttpUrl
 from ..models import AccountConfig, FintsTransaction
 from .base import BaseApp, BaseAppConfig
 
+REQUEST_TIMEOUT = 30
+
 
 class ActualAppConfig(BaseAppConfig):
     actual_api_url: HttpUrl
@@ -18,6 +20,8 @@ class ActualAppConfig(BaseAppConfig):
 
 
 class ActualApp(BaseApp):
+    is_written_account = False
+
     def __init__(self, config: ActualAppConfig) -> None:
         self.config = config
 
@@ -43,9 +47,7 @@ class ActualApp(BaseApp):
             "accept": "application/json",
         }
         if self.config.actual_encryption_password:
-            headers["budget-encryption-password"] = (
-                self.config.actual_encryption_password
-            )
+            headers["budget-encryption-password"] = self.config.actual_encryption_password
 
         # Each transaction has a key _account_id specifying the actual account id.
         # We need to split the transactions by account id to assign them correctly.
@@ -54,9 +56,7 @@ class ActualApp(BaseApp):
         for transaction in transactions:
             account_id = transaction.pop("_account_id")
             if account_id not in self.config.actual_account_ids:
-                logger.warning(
-                    f"Skipping transaction for unknown account id {account_id}"
-                )
+                logger.warning(f"Skipping transaction for unknown account id {account_id}")
                 continue
             transactions_by_account.setdefault(account_id, []).append(transaction)
 
@@ -70,34 +70,29 @@ class ActualApp(BaseApp):
                     f"{url}/budgets/{sync_id}/accounts/{account_id}/transactions/import",
                     headers=headers,
                     json={"transactions": chunk},
+                    timeout=REQUEST_TIMEOUT,
                 )
 
                 if not response.ok:
-                    logger.error(f"Failed creating transactions: \n\n{response.text}")
-                    return new, duplicates
+                    logger.error(f"Failed creating transactions for account {account_id}: \n\n{response.text}")
+                    break
 
-                report = response.json().get('data', {})
+                report = response.json().get("data", {})
                 logger.info(f"Received import report:\n{report}")
                 new += report.get("added", [])
                 duplicates += report.get("updated", [])
         return new, duplicates
-    
-    is_written_account = False
 
-    def augment_transaction(
-        self, transaction: FintsTransaction, account: AccountConfig
-    ):
+    def augment_transaction(self, transaction: FintsTransaction, account: AccountConfig):
         if not self.is_written_account:
             logger.debug(f"Writing transactions to account {account}")
             self.is_written_account = True
-        payee_name = transaction.applicant_name
-        if len(payee_name) > 50:
-            payee_name = payee_name[:50]
+        payee_name = (transaction.applicant_name or "Unnamed")[:50]
 
         return {
             "_account_id": account.per_app_id,
             "date": transaction.date.isoformat(),
-            "payee_name": transaction.applicant_name or "Unnamed",
+            "payee_name": payee_name,
             "imported_payee": transaction.applicant_name or "Unnamed",
             "notes": transaction.purpose,
             "amount": int(Decimal(transaction.amount) / 10),

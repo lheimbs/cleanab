@@ -10,6 +10,7 @@ from pydantic_core import CoreSchema, core_schema
 
 class BaseAppConfig(BaseModel):
     """Base class for app configurations. Does not define custom schema."""
+
     pass
 
 
@@ -17,18 +18,14 @@ class _AppConfigValidator:
     """Custom validator for dynamically loading app configurations."""
 
     @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: Any, handler: GetCoreSchemaHandler
-    ) -> CoreSchema:
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: GetCoreSchemaHandler) -> CoreSchema:
         return core_schema.no_info_plain_validator_function(
             cls._validate,
             serialization=core_schema.to_string_ser_schema(),
         )
 
     @classmethod
-    def __get_pydantic_json_schema__(
-        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
-    ) -> JsonSchemaValue:
+    def __get_pydantic_json_schema__(cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler) -> JsonSchemaValue:
         return {"type": "object"}
 
     @staticmethod

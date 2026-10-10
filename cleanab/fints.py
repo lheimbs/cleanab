@@ -24,16 +24,12 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
         if len(mechanisms) > 1:
             logger.info("Multiple tan mechanisms available. Which one do you prefer?")
             for i, m in enumerate(mechanisms):
-                logger.info(
-                    i, f"Function {m[1].security_function}: {m[1].name}"
-                )
+                logger.info(f"{i}: Function {m[1].security_function}: {m[1].name}")
             choice = input("Choice: ").strip()
             fints.set_tan_mechanism(mechanisms[int(choice)][0])
 
     if fints.is_tan_media_required() and not fints.selected_tan_medium:
-        logger.info(
-            "We need the name of the TAN medium, let's fetch them from the bank"
-        )
+        logger.info("We need the name of the TAN medium, let's fetch them from the bank")
         tan_media = fints.get_tan_media()
         if not tan_media:
             logger.error("No TAN media available")
@@ -44,17 +40,14 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
             logger.info("Multiple tan media available. Which one do you prefer?")
             for i, tan_medium in enumerate(tan_media[1]):
                 logger.info(
-                    i,
-                    f"Medium {tan_medium.tan_medium_name}: Phone no. {tan_medium.mobile_number_masked}, "
-                    f"Last used {tan_medium.last_use}",
+                    f"{i}: Medium {tan_medium.tan_medium_name}: Phone no. {tan_medium.mobile_number_masked}, "
+                    f"Last used {tan_medium.last_use}"
                 )
             choice = input("Choice: ").strip()
             fints.set_tan_medium(tan_media[1][int(choice)])
 
 
-def handle_tan_response(
-    fints: FinTS3PinTanClient, tan_response: NeedTANResponse
-) -> list:
+def handle_tan_response(fints: FinTS3PinTanClient, tan_response: NeedTANResponse) -> list:
     logger.info(f"TAN needed: {tan_response.challenge}")
 
     if tan_response.challenge_hhduc:
@@ -87,14 +80,10 @@ def handle_tan_response(
         return []
 
 
-def retrieve_transactions(
-    sepa_account, fints: FinTS3PinTanClient, *, start_date, end_date
-):
+def retrieve_transactions(sepa_account, fints: FinTS3PinTanClient, *, start_date, end_date):
     with fints:
         bootstrap_fints(fints)
-        result = fints.get_transactions(
-            sepa_account, start_date=start_date, end_date=end_date
-        )
+        result = fints.get_transactions(sepa_account, start_date=start_date, end_date=end_date)
         if isinstance(result, NeedTANResponse):
             result = handle_tan_response(fints, result)
     return [t.data for t in result]
@@ -130,12 +119,14 @@ def get_fints_client(blz, username, password, endpoint, product_id):
             bootstrap_fints(fints)
 
             # Handle potential TAN requirement for dialog initialization
-            while isinstance(fints.init_tan_response, NeedTANResponse):
+            # fints never clears init_tan_response itself, so handle it once and reset it
+            if isinstance(fints.init_tan_response, NeedTANResponse):
                 handle_tan_response(fints, fints.init_tan_response)
+                fints.init_tan_response = None
 
             # Get SEPA accounts and handle potential TAN requirement
             sepa_accounts = fints.get_sepa_accounts()
-            while isinstance(sepa_accounts, NeedTANResponse):
+            if isinstance(sepa_accounts, NeedTANResponse):
                 sepa_accounts = handle_tan_response(fints, sepa_accounts)
 
     return fints, sepa_accounts
@@ -158,8 +149,6 @@ def process_fints_account(account, earliest, latest, product_id) -> list:
     if account.account_type == AccountType.HOLDING:
         transactions = retrieve_holdings(sepa_account, fints)
     else:
-        transactions = retrieve_transactions(
-            sepa_account, fints, start_date=earliest, end_date=latest
-        )
+        transactions = retrieve_transactions(sepa_account, fints, start_date=earliest, end_date=latest)
 
     return transactions

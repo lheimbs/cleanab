@@ -24,10 +24,7 @@ class ConfigFile(click.File):
     "-n",
     "--dry-run",
     is_flag=True,
-    help=(
-        "Only fetch and clean up the transactions. None will be added in your budgeting"
-        " app."
-    ),
+    help=("Only fetch and clean up the transactions. None will be added in your budgeting app."),
 )
 @click.option(
     "-s",

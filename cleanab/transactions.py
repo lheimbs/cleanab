@@ -21,9 +21,7 @@ def process_transaction(transaction, cleaner):
     applicant_name = data.get("applicant_name", None) or ""
     purpose = data.get("purpose", None) or ""
     import_id = md5(
-        (
-            entry_date.strftime("%Y-%m-%d") + applicant_name + purpose + str(amount)
-        ).encode("utf-8")
+        (entry_date.strftime("%Y-%m-%d") + applicant_name + purpose + str(amount)).encode("utf-8")
     ).hexdigest()
 
     local_data = data.copy()

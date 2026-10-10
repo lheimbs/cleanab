@@ -18,16 +18,13 @@ class TimespanConfig(BaseModel):
 
 
 class CleanabConfig(BaseModel):
-    concurrency: Annotated[int, Field(gt=0)] = 1
     minimum_holdings_delta: Annotated[float, Field(ge=0)] = 1
     debug: bool = False
     fints_product_id: str | None = None
 
 
 NestedReplacementEntry = list[ReplacementDefinition | str]
-FullReplacementEntry = list[
-    NestedReplacementEntry | ReplacementDefinition | str
-]
+FullReplacementEntry = list[NestedReplacementEntry | ReplacementDefinition | str]
 
 ReplacementFields: type[BaseModel] = create_model(
     "ReplacementFields",
@@ -37,10 +34,7 @@ ReplacementFields: type[BaseModel] = create_model(
 
 FinalizerFields = create_model(
     "FinalizerFields",
-    **{
-        field: (FinalizerDefinition, FinalizerDefinition())
-        for field in FIELDS_TO_CLEAN_UP
-    },  # type: ignore
+    **{field: (FinalizerDefinition, FinalizerDefinition()) for field in FIELDS_TO_CLEAN_UP},  # type: ignore
 )
 
 
@@ -67,9 +61,7 @@ class Config(BaseModel):
 
     def load_apps(self):
         logger.debug(f"Loading configured apps {self.apps}")
-        self._parsed_apps = [
-            load_app(app_name, app_config) for app_name, app_config in self.apps.items()
-        ]
+        self._parsed_apps = [load_app(app_name, app_config) for app_name, app_config in self.apps.items()]
 
     def get_apps(self) -> list[BaseApp]:
         return self._parsed_apps
