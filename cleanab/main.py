@@ -121,7 +121,7 @@ class Cleanab:
                     logger.debug(
                         f"{app_connection}: Intermediary:\n\n{intermediary}\n\n"
                     )
-                return
+                continue
 
             logger.info(f"Creating transactions in {app_connection}")
             new, duplicates = app_connection.create_transactions(transactions)
