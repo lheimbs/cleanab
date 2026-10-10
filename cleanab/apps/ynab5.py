@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 from ynab_api.api_client import ApiClient
@@ -33,6 +34,9 @@ class NewYnabApp(BaseApp):
         ynab_conf.api_key["bearer"] = access_token
         ynab_conf.api_key_prefix["bearer"] = "Bearer"
         return ApiClient(ynab_conf)
+
+    def create_intermediary(self, transactions) -> str:
+        return json.dumps([t.to_dict() for t in transactions], indent=2, default=str)
 
     def create_transactions(self, transactions):
         api = TransactionsApi(self._api_client)
