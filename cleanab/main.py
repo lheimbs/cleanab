@@ -126,8 +126,8 @@ class Cleanab:
             logger.info(f"Creating transactions in {app_connection}")
             new, duplicates = app_connection.create_transactions(transactions)
 
-            logger.info(f"Created {new} new transactions")
-            logger.info(f"Saw {duplicates} duplicates")
+            logger.info(f"Created {len(new)} new transactions")
+            logger.info(f"Saw {len(duplicates)} duplicates")
 
     def process_account_transactions(self, transactions: list, account: AccountConfig):
         apps = self.config.get_apps()
