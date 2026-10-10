@@ -4,12 +4,14 @@ import click
 import logzero
 import yaml
 
+from .main import Cleanab
 from .models.config import Config
 
-logzero.__name__ = "fints"
-logzero.setup_logger(level=logging.ERROR)
 
-from cleanab.main import Cleanab  # noqa: F401, E402
+def setup_logging(verbose: bool = False) -> None:
+    """Quiet the python-fints library and set the level of cleanab's own logger."""
+    logging.getLogger("fints").setLevel(logging.ERROR)
+    logzero.loglevel(logging.DEBUG if verbose else logging.INFO)
 
 
 class ConfigFile(click.File):
@@ -66,5 +68,6 @@ class ConfigFile(click.File):
 )
 def cli(**kwargs):
     c = Cleanab(**kwargs)
+    setup_logging(c.verbose or kwargs["config"].cleanab.debug)
     c.setup()
     c.run()
