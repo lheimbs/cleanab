@@ -125,7 +125,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "requests", specifier = ">=2.28" },
-    { name = "ynab-api", git = "https://github.com/dmlerner/ynab-api" },
+    { name = "ynab-api", git = "https://github.com/dmlerner/ynab-api?rev=08f099b4d77d7fbd02ffa68eed6241f938f3760f" },
 ]
 
 [package.metadata.requires-dev]
@@ -722,7 +722,7 @@ wheels = [
 [[package]]
 name = "ynab-api"
 version = "2.0.2"
-source = { git = "https://github.com/dmlerner/ynab-api#08f099b4d77d7fbd02ffa68eed6241f938f3760f" }
+source = { git = "https://github.com/dmlerner/ynab-api?rev=08f099b4d77d7fbd02ffa68eed6241f938f3760f#08f099b4d77d7fbd02ffa68eed6241f938f3760f" }
 dependencies = [
     { name = "python-dateutil" },
     { name = "urllib3" },
