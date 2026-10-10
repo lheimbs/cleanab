@@ -24,9 +24,7 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
         if len(mechanisms) > 1:
             logger.info("Multiple tan mechanisms available. Which one do you prefer?")
             for i, m in enumerate(mechanisms):
-                logger.info(
-                    i, f"Function {m[1].security_function}: {m[1].name}"
-                )
+                logger.info(f"{i}: Function {m[1].security_function}: {m[1].name}")
             choice = input("Choice: ").strip()
             fints.set_tan_mechanism(mechanisms[int(choice)][0])
 
@@ -44,9 +42,8 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
             logger.info("Multiple tan media available. Which one do you prefer?")
             for i, tan_medium in enumerate(tan_media[1]):
                 logger.info(
-                    i,
-                    f"Medium {tan_medium.tan_medium_name}: Phone no. {tan_medium.mobile_number_masked}, "
-                    f"Last used {tan_medium.last_use}",
+                    f"{i}: Medium {tan_medium.tan_medium_name}: Phone no. {tan_medium.mobile_number_masked}, "
+                    f"Last used {tan_medium.last_use}"
                 )
             choice = input("Choice: ").strip()
             fints.set_tan_medium(tan_media[1][int(choice)])
