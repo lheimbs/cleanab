@@ -26,7 +26,7 @@ dev = ["ruff>=0.8.0", "pytest>=8"]
 [tool.uv]
 
 [tool.uv.sources]
-ynab-api = { git = "https://github.com/dmlerner/ynab-api" }
+ynab-api = { git = "https://github.com/dmlerner/ynab-api", rev = "08f099b4d77d7fbd02ffa68eed6241f938f3760f" }
 
 [tool.ruff]
 line-length = 120
