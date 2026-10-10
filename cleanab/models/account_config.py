@@ -1,10 +1,10 @@
 import json
-import pickle
 from typing import Annotated
 
+from logzero import logger
 from pydantic import BaseModel, HttpUrl, StringConstraints, field_validator
 
-from ..utils import CACHE_HOME
+from ..utils import CACHE_HOME, json_default, json_object_hook
 from ..validators import is_iban
 from .enums import AccountType
 
@@ -41,7 +41,7 @@ class AccountConfig(BaseModel):
 
     @property
     def _account_cache_filename(self):
-        return CACHE_HOME / f"{self.iban}.pickle"
+        return CACHE_HOME / f"{self.iban}.json"
 
     @property
     def _cleaned_account_cache_filename(self):
@@ -60,14 +60,17 @@ class AccountConfig(BaseModel):
 
     def write_account_cache(self, transactions):
         CACHE_HOME.mkdir(parents=True, exist_ok=True)
-        with open(self._account_cache_filename, "wb") as f:
-            pickle.dump(transactions, f)
+        try:
+            with open(self._account_cache_filename, "w") as f:
+                json.dump(transactions, f, default=json_default)
+        except OSError:
+            logger.exception("Could not write account cache for %s", self)
 
     def write_cleaned_account_cache(self, transactions):
         CACHE_HOME.mkdir(parents=True, exist_ok=True)
         with open(self._cleaned_account_cache_filename, "w") as f:
-            json.dump(transactions, f)
+            json.dump(transactions, f, default=json_default)
 
     def read_account_cache(self):
-        with open(self._account_cache_filename, "rb") as f:
-            return pickle.load(f)
+        with open(self._account_cache_filename) as f:
+            return json.load(f, object_hook=json_object_hook)
