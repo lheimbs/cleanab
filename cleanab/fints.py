@@ -127,12 +127,14 @@ def get_fints_client(blz, username, password, endpoint, product_id):
             bootstrap_fints(fints)
 
             # Handle potential TAN requirement for dialog initialization
-            while isinstance(fints.init_tan_response, NeedTANResponse):
+            # fints never clears init_tan_response itself, so handle it once and reset it
+            if isinstance(fints.init_tan_response, NeedTANResponse):
                 handle_tan_response(fints, fints.init_tan_response)
+                fints.init_tan_response = None
 
             # Get SEPA accounts and handle potential TAN requirement
             sepa_accounts = fints.get_sepa_accounts()
-            while isinstance(sepa_accounts, NeedTANResponse):
+            if isinstance(sepa_accounts, NeedTANResponse):
                 sepa_accounts = handle_tan_response(fints, sepa_accounts)
 
     return fints, sepa_accounts
