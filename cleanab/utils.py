@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import sys
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -58,3 +60,38 @@ def regex_sub_instance(entry: ReplacementDefinition):
         return regex.sub(entry.repl, x), transformed
 
     return substitute
+
+
+def json_default(obj):
+    """Encode the value types found in raw FinTS transaction data as tagged JSON."""
+    # Imported lazily; mt940 is only needed for the bank data types
+    from mt940.models import Amount
+
+    if isinstance(obj, datetime.datetime):
+        return {"__type__": "datetime", "value": obj.isoformat()}
+    if isinstance(obj, datetime.date):
+        return {"__type__": "date", "value": obj.isoformat()}
+    if isinstance(obj, Decimal):
+        return {"__type__": "decimal", "value": str(obj)}
+    if isinstance(obj, Amount):
+        return {"__type__": "amount", "amount": str(obj.amount), "currency": obj.currency}
+    # Unknown types: keep a readable value rather than failing the whole cache write
+    return str(obj)
+
+
+def json_object_hook(obj):
+    """Inverse of json_default."""
+    from mt940.models import Amount
+
+    kind = obj.get("__type__")
+    if kind == "datetime":
+        return datetime.datetime.fromisoformat(obj["value"])
+    if kind == "date":
+        return datetime.date.fromisoformat(obj["value"])
+    if kind == "decimal":
+        return Decimal(obj["value"])
+    if kind == "amount":
+        # Amount() takes a signed-by-status string; the stored amount is already signed
+        amount = Amount(str(abs(Decimal(obj["amount"]))), "D" if Decimal(obj["amount"]) < 0 else "C", obj["currency"])
+        return amount
+    return obj

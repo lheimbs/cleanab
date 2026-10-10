@@ -26,7 +26,7 @@ class CleanabConfig(BaseModel):
 NestedReplacementEntry = list[ReplacementDefinition | str]
 FullReplacementEntry = list[NestedReplacementEntry | ReplacementDefinition | str]
 
-ReplacementFields: type[BaseModel] = create_model(
+ReplacementFields = create_model(
     "ReplacementFields",
     **{field: (FullReplacementEntry, []) for field in FIELDS_TO_CLEAN_UP},  # type: ignore
 )
@@ -42,9 +42,9 @@ class Config(BaseModel):
     cleanab: CleanabConfig = CleanabConfig()
     timespan: TimespanConfig = TimespanConfig()
     accounts: Annotated[list[AccountConfig], Field(min_length=1)]
-    replacements: BaseModel = ReplacementFields()
-    pre_replacements: BaseModel = ReplacementFields()
-    finalizer: BaseModel = FinalizerFields()
+    replacements: ReplacementFields = ReplacementFields()  # type: ignore[valid-type]
+    pre_replacements: ReplacementFields = ReplacementFields()  # type: ignore[valid-type]
+    finalizer: FinalizerFields = FinalizerFields()  # type: ignore[valid-type]
     apps: dict[str, _AppConfigValidator] = {}
     _parsed_apps: list[BaseApp] = []
     model_config: ConfigDict = ConfigDict(extra="allow")

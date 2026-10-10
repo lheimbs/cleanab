@@ -40,14 +40,16 @@ replacements:
       repl: 'Amazon Marketplace'
     - 'Visa Card Transact '
     - pattern: '^Visa'
-    - string: Gmbh
+    - pattern: Gmbh
       repl: GmbH
+      regex: false
     - pattern: 'Sumup  \*'
     - pattern: '^Amz\*'
       repl: 'Amazon: '
     - pattern: '^Visa '
-    - string: 'Itunes.Com/Bill'
+    - pattern: 'Itunes.Com/Bill'
       repl: iTunes/App Store
+      regex: false
 
   purpose:
     - pattern: '([^\s])bargeldauszahlung'
@@ -69,7 +71,8 @@ replacements:
       repl: 'Bargeldauszahlung (\1.\2., \3:\4:\5) '
     - pattern: '\(Visa Card\)'
     - pattern: 'Arn\d{8,}$'
-    - string: 'Auslandseinsatzentgeltkreditkarte'
+    - pattern: 'Auslandseinsatzentgeltkreditkarte'
       repl: ' Auslandseinsatzentgelt'
+      regex: false
     - pattern: '(\w)kurs ([\d\,]+)'
       repl: '\1 Kurs: \2'
