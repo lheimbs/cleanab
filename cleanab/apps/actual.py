@@ -9,6 +9,9 @@ from ..models import AccountConfig, FintsTransaction
 from .base import BaseApp, BaseAppConfig
 
 
+REQUEST_TIMEOUT = 30
+
+
 class ActualAppConfig(BaseAppConfig):
     actual_api_url: HttpUrl
     actual_api_key: str
@@ -18,6 +21,8 @@ class ActualAppConfig(BaseAppConfig):
 
 
 class ActualApp(BaseApp):
+    is_written_account = False
+
     def __init__(self, config: ActualAppConfig) -> None:
         self.config = config
 
@@ -70,19 +75,20 @@ class ActualApp(BaseApp):
                     f"{url}/budgets/{sync_id}/accounts/{account_id}/transactions/import",
                     headers=headers,
                     json={"transactions": chunk},
+                    timeout=REQUEST_TIMEOUT,
                 )
 
                 if not response.ok:
-                    logger.error(f"Failed creating transactions: \n\n{response.text}")
-                    return new, duplicates
+                    logger.error(
+                        f"Failed creating transactions for account {account_id}: \n\n{response.text}"
+                    )
+                    break
 
                 report = response.json().get('data', {})
                 logger.info(f"Received import report:\n{report}")
                 new += report.get("added", [])
                 duplicates += report.get("updated", [])
         return new, duplicates
-    
-    is_written_account = False
 
     def augment_transaction(
         self, transaction: FintsTransaction, account: AccountConfig
@@ -90,14 +96,12 @@ class ActualApp(BaseApp):
         if not self.is_written_account:
             logger.debug(f"Writing transactions to account {account}")
             self.is_written_account = True
-        payee_name = transaction.applicant_name
-        if len(payee_name) > 50:
-            payee_name = payee_name[:50]
+        payee_name = (transaction.applicant_name or "Unnamed")[:50]
 
         return {
             "_account_id": account.per_app_id,
             "date": transaction.date.isoformat(),
-            "payee_name": transaction.applicant_name or "Unnamed",
+            "payee_name": payee_name,
             "imported_payee": transaction.applicant_name or "Unnamed",
             "notes": transaction.purpose,
             "amount": int(Decimal(transaction.amount) / 10),
