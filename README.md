@@ -6,7 +6,53 @@ Import FinTS/HBCI transactions (🇩🇪 👋) into multiple apps using their AP
 
 - [YNAB](https://ynab.com/)
 - [Actual Budget](https://actualbudget.org/)
+- [Firefly III](https://www.firefly-iii.org/) (via the Data Importer)
 
 My rationale for creating this (instead of using an existing solution), was the poor parsing/processing/cleanup of transaction data like payee and memo in other tools.
 Configuration is done in YAML and can include an arbitrary amount of replacement definitions that should be applied to the transaction data.
 See [config.yaml.sample](config.yaml.sample) for example use.
+
+## Installation
+
+```sh
+uv sync
+cp config.yaml.sample config.yaml  # then edit
+uv run python -m cleanab --help
+```
+
+Or with Docker (mount your config into `/app`):
+
+```sh
+docker build -t cleanab .
+docker run --rm -it -v "$PWD/config.yaml:/app/config.yaml:ro" cleanab --dry-run
+```
+
+`-it` is needed because the bank may ask for a TAN on the terminal.
+
+## Usage
+
+```sh
+python -m cleanab [OPTIONS]
+```
+
+| Option | Description |
+| --- | --- |
+| `-n`, `--dry-run` | Fetch and clean transactions, but don't create anything in your apps. |
+| `-s`, `--save` | Write the cleaned transactions to the cache directory for inspection. |
+| `-t`, `--test` | Cache raw bank data on disk and reuse it on later runs; implies `--dry-run` and `--verbose`. |
+| `-v`, `--verbose` | Show the replacements made to the received data. |
+| `-c`, `--config` | Path to the config file (default `./config.yaml`). |
+
+Use `--test` while tuning your `replacements`, so the bank is only queried once.
+
+## Security note
+
+`config.yaml` contains your FinTS credentials in plaintext. Keep it out of version control (it is gitignored) and restrict its file permissions.
+Holding (depot) accounts are not supported yet and are skipped.
+
+## Development
+
+```sh
+uv run pytest
+uv run ruff check . && uv run ruff format .
+```

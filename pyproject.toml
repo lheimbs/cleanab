@@ -20,7 +20,7 @@ dependencies = [
 pycleanab = "cleanab.cli:cli"
 
 [dependency-groups]
-dev = ["ruff>=0.8.0"]
+dev = ["ruff>=0.8.0", "pytest>=8"]
 
 [tool.uv]
 
@@ -41,3 +41,7 @@ known-first-party = ["cleanab"]
 
 [tool.pylint.messages_control]
 disable = "all"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
