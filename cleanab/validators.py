@@ -1,19 +1,17 @@
+import re
 import string
 from uuid import UUID
 
 LETTERS = {ord(d): str(i) for i, d in enumerate(string.digits + string.ascii_uppercase)}
 
 
-def _translate_iban(iban):
-    iban = iban[:2] + "00" + iban[4:]
-    return (iban[4:] + iban[:4]).translate(LETTERS)
-
-
 def is_iban(iban_string):
-    modulo = iban_string[2:2]
-    number_iban = _translate_iban(iban_string)
-    iban_constructed = f"{98 - (int(number_iban) % 97):0>2}"
-    return modulo == iban_constructed[2:2]
+    """Validate an IBAN using the ISO 13616 mod-97 check."""
+    iban = iban_string.replace(" ", "").upper()
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", iban):
+        return False
+    number_iban = (iban[4:] + iban[:4]).translate(LETTERS)
+    return int(number_iban) % 97 == 1
 
 
 def is_uuid(uuid_string):

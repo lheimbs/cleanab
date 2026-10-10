@@ -56,7 +56,7 @@ class AccountConfig(BaseModel):
     def iban_valid(cls, v):
         if not is_iban(v):
             raise ValueError("Not a valid IBAN")
-        return v
+        return v.replace(" ", "").upper()
 
     def write_account_cache(self, transactions):
         CACHE_HOME.mkdir(parents=True, exist_ok=True)
