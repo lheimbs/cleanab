@@ -69,7 +69,7 @@ class FieldCleaner:
 
     def clean_field(self, field, cleaned):
         transformations = {}
-        for cleaner in self.cleaners.get(field, [])if self.cleaners else []:
+        for cleaner in self.cleaners.get(field, []) if self.cleaners else []:
             before_cleaning = cleaned
             cleaned, local_transformations = cleaner(cleaned)
             if before_cleaning != cleaned:

@@ -29,9 +29,7 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
             fints.set_tan_mechanism(mechanisms[int(choice)][0])
 
     if fints.is_tan_media_required() and not fints.selected_tan_medium:
-        logger.info(
-            "We need the name of the TAN medium, let's fetch them from the bank"
-        )
+        logger.info("We need the name of the TAN medium, let's fetch them from the bank")
         tan_media = fints.get_tan_media()
         if not tan_media:
             logger.error("No TAN media available")
@@ -49,9 +47,7 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
             fints.set_tan_medium(tan_media[1][int(choice)])
 
 
-def handle_tan_response(
-    fints: FinTS3PinTanClient, tan_response: NeedTANResponse
-) -> list:
+def handle_tan_response(fints: FinTS3PinTanClient, tan_response: NeedTANResponse) -> list:
     logger.info(f"TAN needed: {tan_response.challenge}")
 
     if tan_response.challenge_hhduc:
@@ -84,14 +80,10 @@ def handle_tan_response(
         return []
 
 
-def retrieve_transactions(
-    sepa_account, fints: FinTS3PinTanClient, *, start_date, end_date
-):
+def retrieve_transactions(sepa_account, fints: FinTS3PinTanClient, *, start_date, end_date):
     with fints:
         bootstrap_fints(fints)
-        result = fints.get_transactions(
-            sepa_account, start_date=start_date, end_date=end_date
-        )
+        result = fints.get_transactions(sepa_account, start_date=start_date, end_date=end_date)
         if isinstance(result, NeedTANResponse):
             result = handle_tan_response(fints, result)
     return [t.data for t in result]
@@ -157,8 +149,6 @@ def process_fints_account(account, earliest, latest, product_id) -> list:
     if account.account_type == AccountType.HOLDING:
         transactions = retrieve_holdings(sepa_account, fints)
     else:
-        transactions = retrieve_transactions(
-            sepa_account, fints, start_date=earliest, end_date=latest
-        )
+        transactions = retrieve_transactions(sepa_account, fints, start_date=earliest, end_date=latest)
 
     return transactions

@@ -8,7 +8,6 @@ from pydantic import HttpUrl
 from ..models import AccountConfig, FintsTransaction
 from .base import BaseApp, BaseAppConfig
 
-
 REQUEST_TIMEOUT = 30
 
 
@@ -48,9 +47,7 @@ class ActualApp(BaseApp):
             "accept": "application/json",
         }
         if self.config.actual_encryption_password:
-            headers["budget-encryption-password"] = (
-                self.config.actual_encryption_password
-            )
+            headers["budget-encryption-password"] = self.config.actual_encryption_password
 
         # Each transaction has a key _account_id specifying the actual account id.
         # We need to split the transactions by account id to assign them correctly.
@@ -59,9 +56,7 @@ class ActualApp(BaseApp):
         for transaction in transactions:
             account_id = transaction.pop("_account_id")
             if account_id not in self.config.actual_account_ids:
-                logger.warning(
-                    f"Skipping transaction for unknown account id {account_id}"
-                )
+                logger.warning(f"Skipping transaction for unknown account id {account_id}")
                 continue
             transactions_by_account.setdefault(account_id, []).append(transaction)
 
@@ -79,20 +74,16 @@ class ActualApp(BaseApp):
                 )
 
                 if not response.ok:
-                    logger.error(
-                        f"Failed creating transactions for account {account_id}: \n\n{response.text}"
-                    )
+                    logger.error(f"Failed creating transactions for account {account_id}: \n\n{response.text}")
                     break
 
-                report = response.json().get('data', {})
+                report = response.json().get("data", {})
                 logger.info(f"Received import report:\n{report}")
                 new += report.get("added", [])
                 duplicates += report.get("updated", [])
         return new, duplicates
 
-    def augment_transaction(
-        self, transaction: FintsTransaction, account: AccountConfig
-    ):
+    def augment_transaction(self, transaction: FintsTransaction, account: AccountConfig):
         if not self.is_written_account:
             logger.debug(f"Writing transactions to account {account}")
             self.is_written_account = True
