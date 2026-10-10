@@ -12,8 +12,6 @@ from .models import AccountConfig
 from .models.enums import AccountType
 from .transactions import process_transaction
 
-TODAY = date.today()
-
 
 class Cleanab:
     def __init__(
@@ -33,6 +31,7 @@ class Cleanab:
         self.config.load_apps()
 
     def setup(self):
+        self.today = date.today()
         self.setup_app_connections()
         for app in self.config.apps.keys():
             logger.info(f"Loaded App {app}")
@@ -45,7 +44,7 @@ class Cleanab:
 
         self.earliest = max(
             [
-                TODAY - timedelta(days=self.config.timespan.maximum_days),
+                self.today - timedelta(days=self.config.timespan.maximum_days),
                 self.config.timespan.earliest_date,
             ]
         )
@@ -58,7 +57,7 @@ class Cleanab:
             raw_transactions = process_fints_account(
                 account,
                 earliest=self.earliest,
-                latest=TODAY,
+                latest=self.today,
                 product_id=self.config.cleanab.fints_product_id,
             )
             account.write_account_cache(raw_transactions)
