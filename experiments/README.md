@@ -32,3 +32,14 @@ The data is split chronologically (default 80/20). Results are reported for all 
 transactions and separately for payees seen / not seen in training, since the unseen group
 is where a model has to earn its install cost. `cov@95%` is the share of transactions that
 could be auto-categorized while keeping 95% precision.
+
+## Unseen-payee evaluation
+
+The chronological split leaves few transactions with payees the model has not seen. For a stable
+estimate of what a model adds, hold payees out instead (all transactions of a payee end up in the same
+fold) and list the most confident mistakes:
+
+```sh
+uv run python -m experiments.evaluate experiments/data/transactions.csv \
+  --since 2023-01-01 --until 2024-03-31 --group-cv 5 --errors 15
+```
