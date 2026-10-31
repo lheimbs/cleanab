@@ -1,22 +1,44 @@
 import json
+from datetime import date
 from decimal import Decimal
+from typing import Literal
 
 import requests
 from logzero import logger
-from pydantic import HttpUrl
+from pydantic import BaseModel, ConfigDict, HttpUrl
 
+from ..classifier.base import Example
+from ..classifier.factory import build_classifier
 from ..models import AccountConfig, FintsTransaction
 from .base import BaseApp, BaseAppConfig
 
 REQUEST_TIMEOUT = 30
 
 
+class CategorizeConfig(BaseModel):
+    """Suggest categories for new transactions, learned from the ones you already categorized in Actual."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    model: Literal["light", "full"] = "light"
+    history_since: date = date(2020, 1, 1)
+    history_until: date | None = None
+    min_confidence: float = 0.5
+    assign_new_payees: bool = False
+    new_payee_min_confidence: float = 0.8
+    descriptions: dict[str, str] = {}
+
+
 class ActualAppConfig(BaseAppConfig):
+    model_config = ConfigDict(extra="forbid")
+
     actual_api_url: HttpUrl
     actual_api_key: str
     actual_sync_id: str
     actual_account_ids: list[str]
     actual_encryption_password: str | None = None
+    categorize: CategorizeConfig = CategorizeConfig()
 
 
 class ActualApp(BaseApp):
@@ -30,6 +52,90 @@ class ActualApp(BaseApp):
 
     def create_intermediary(self, transactions: tuple) -> str:
         return json.dumps(transactions, indent=2)
+
+    def _headers(self) -> dict:
+        headers = {"x-api-key": self.config.actual_api_key, "accept": "application/json"}
+        if self.config.actual_encryption_password:
+            headers["budget-encryption-password"] = self.config.actual_encryption_password
+        return headers
+
+    def _get(self, path: str, **params):
+        url = f"{str(self.config.actual_api_url).rstrip('/')}/budgets/{self.config.actual_sync_id}{path}"
+        response = requests.get(url, headers=self._headers(), params=params, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return response.json()["data"]
+
+    def _load_reference_data(self, since: date, until: date | None):
+        """Return (category name -> id, history examples, imported_ids already in Actual)."""
+        category_list = self._get("/categories")
+        category_ids = {c["name"]: c["id"] for c in category_list}
+        names = {c["id"]: c["name"] for c in category_list}
+        payees = {p["id"]: p["name"] for p in self._get("/payees")}
+        history: list[Example] = []
+        existing: set[str] = set()
+        for account_id in self.config.actual_account_ids:
+            params = {"since_date": since.isoformat()}
+            if until:
+                params["until_date"] = until.isoformat()
+            for tx in self._get(f"/accounts/{account_id}/transactions", **params):
+                if tx.get("imported_id"):
+                    existing.add(tx["imported_id"])
+                category = names.get(tx.get("category")) if tx.get("category") else None
+                if not category or tx.get("transfer_id") or tx.get("subtransactions"):
+                    continue
+                history.append(
+                    Example(
+                        payee=payees.get(tx.get("payee"), "") or tx.get("imported_payee") or "",
+                        purpose=tx.get("notes") or "",
+                        category=category,
+                        date=date.fromisoformat(tx["date"]),
+                    )
+                )
+        return category_ids, sorted(history, key=lambda e: e.date), existing
+
+    def prepare_transactions(self, transactions: tuple) -> tuple:
+        settings = self.config.categorize
+        if not settings.enabled:
+            return transactions
+        try:
+            return self._categorize(transactions)
+        except Exception:
+            # Categories are a convenience: never block the import because of them.
+            logger.exception("Categorization failed, importing without categories")
+            return transactions
+
+    def _categorize(self, transactions: tuple) -> tuple:
+        settings = self.config.categorize
+        category_ids, history, existing = self._load_reference_data(settings.history_since, settings.history_until)
+        if not history:
+            logger.warning("No categorized transactions found in Actual, skipping categorization")
+            return transactions
+        classifier = build_classifier(settings.model, settings.descriptions)
+        classifier.fit(history)
+        categories = sorted({e.category for e in history if e.category in category_ids})
+
+        assigned = suggested = 0
+        for transaction in transactions:
+            if transaction.get("imported_id") in existing:
+                continue  # already in Actual: never touch what is there
+            example = Example(payee=transaction["payee_name"], purpose=transaction.get("notes", ""))
+            prediction = classifier.predict(example, categories)
+            if prediction.category is None:
+                continue
+            known = classifier.knows(example)
+            threshold = settings.min_confidence if known else settings.new_payee_min_confidence
+            if known or settings.assign_new_payees:
+                if prediction.confidence >= threshold:
+                    transaction["category"] = category_ids[prediction.category]
+                    assigned += 1
+                    logger.info(f"Category {prediction.category} ({prediction.confidence:.2f}): {example.payee}")
+                    continue
+            suggested += 1
+            logger.info(
+                f"Suggested category {prediction.category} ({prediction.confidence:.2f}), not assigned: {example.payee}"
+            )
+        logger.info(f"Categories: {assigned} assigned, {suggested} only suggested")
+        return transactions
 
     def create_transactions(self, transactions: list[dict]) -> tuple[list, list]:
         """Create transactions in Actual.

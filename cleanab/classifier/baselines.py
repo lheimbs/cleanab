@@ -22,6 +22,9 @@ class ExactPayeeClassifier:
             if example.category:
                 self._by_payee[normalize_text(example.payee)][example.category] += 1
 
+    def knows(self, example: Example) -> bool:
+        return normalize_text(example.payee) in self._by_payee
+
     def predict(self, example: Example, categories: list[str]) -> Prediction:
         counts = self._by_payee.get(normalize_text(example.payee))
         if not counts:
