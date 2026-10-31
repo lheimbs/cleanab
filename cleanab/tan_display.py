@@ -5,9 +5,10 @@ Over SSH there is no desktop to open an image viewer on, so we draw into the ter
 - ``kitty``: the kitty graphics protocol (kitty, Ghostty, WezTerm, Konsole, ...)
 - ``iterm``: iTerm2 inline images (iTerm2, WezTerm, mintty)
 - ``blocks``: truecolor half-block characters, which work in nearly every modern terminal
-- ``window``: open the image with the local image viewer (PIL), only useful on a desktop session
+- ``window``: open the image with the local image viewer (PIL); only used when you ask for it
 
-``auto`` (the default) picks one from the environment. Set ``cleanab.tan_display`` in the config or the
+``auto`` (the default) picks a terminal mode from the environment and never ``window``.
+Set ``cleanab.tan_display`` in the config or the
 ``CLEANAB_TAN_DISPLAY`` environment variable to force a mode.
 """
 
@@ -42,10 +43,8 @@ def detect_mode(env: dict[str, str] | None = None) -> str:
         return "kitty"
     if program == "iTerm.app" or env.get("LC_TERMINAL") == "iTerm2":
         return "iterm"
-    over_ssh = bool(env.get("SSH_CONNECTION") or env.get("SSH_TTY"))
-    has_desktop = bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")) or sys.platform in ("darwin", "win32")
-    if has_desktop and not over_ssh:
-        return "window"
+    # Never guess "window": multiplexers and session managers (tmux, herdr, ...) drop SSH_* variables while the
+    # machine still has a desktop, so the viewer would open on the remote screen. Opt in with tan_display: window.
     return "blocks"
 
 

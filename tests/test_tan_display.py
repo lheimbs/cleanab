@@ -25,12 +25,12 @@ def png_bytes(size=(8, 8), color=(0, 0, 0)):
         ({"TERM": "xterm-kitty", "TMUX": "/tmp/tmux"}, "blocks"),
         ({"TERM": "screen-256color"}, "blocks"),
         ({"SSH_CONNECTION": "a b c d", "DISPLAY": ":0"}, "blocks"),
-        ({"DISPLAY": ":0"}, "window"),
+        ({"DISPLAY": ":0"}, "blocks"),
+        ({"WAYLAND_DISPLAY": "wayland-0"}, "blocks"),
         ({}, "blocks"),
     ],
 )
-def test_detect_mode(env, expected, monkeypatch):
-    monkeypatch.setattr(tan_display.sys, "platform", "linux")
+def test_detect_mode(env, expected):
     assert tan_display.detect_mode(env) == expected
 
 
