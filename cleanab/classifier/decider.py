@@ -33,7 +33,7 @@ class DeciderClassifier:
             try:
                 from decider.infer import Decider
             except ImportError as exc:
-                raise RuntimeError('install the model extra: uv sync --group models (decider-ai[gguf])') from exc
+                raise RuntimeError("install the model extra: uv sync --group models (decider-ai[gguf])") from exc
             self._decider = Decider(self.repo, gguf_file=self.gguf_file) if self.gguf_file else Decider(self.repo)
         return self._decider
 
