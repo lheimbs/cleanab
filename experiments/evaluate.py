@@ -32,6 +32,19 @@ def _decider() -> Classifier:
     return DeciderClassifier(descriptions=DESCRIPTIONS)
 
 
+def _hybrid() -> Classifier:
+    from cleanab.classifier.decider import DeciderClassifier
+    from cleanab.classifier.hybrid import HybridClassifier
+
+    return HybridClassifier([CharNgramClassifier(), DeciderClassifier(descriptions=DESCRIPTIONS)], "hybrid")
+
+
+def _hybrid_lite() -> Classifier:
+    from cleanab.classifier.hybrid import HybridClassifier
+
+    return HybridClassifier([CharNgramClassifier()], "hybrid-lite")
+
+
 DESCRIPTIONS: dict[str, str] = {}
 
 CLASSIFIERS = {
@@ -39,6 +52,8 @@ CLASSIFIERS = {
     "char-ngram-lr": CharNgramClassifier,
     "gliner2": _gliner,
     "decider-4b": _decider,
+    "hybrid": _hybrid,
+    "hybrid-lite": _hybrid_lite,
 }
 
 
