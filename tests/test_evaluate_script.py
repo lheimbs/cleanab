@@ -56,3 +56,17 @@ def test_end_to_end_run_prints_report(evaluate_script, tmp_path, capsys):
     output = capsys.readouterr().out
     assert "exact-payee" in output
     assert "seen payee" in output
+
+
+def test_load_examples_filters_since_and_reconciled(evaluate_script, tmp_path):
+    csv_path = tmp_path / "t.csv"
+    csv_path.write_text(
+        "date,payee,purpose,category,reconciled\n"
+        "2023-01-01,Old,,Cat,1\n"
+        "2024-01-01,NewReconciled,,Cat,1\n"
+        "2024-02-01,NewOpen,,Cat,0\n",
+        encoding="utf-8",
+    )
+    since = date(2024, 1, 1)
+    assert [e.payee for e in evaluate_script.load_examples(csv_path, since=since)] == ["NewReconciled", "NewOpen"]
+    assert [e.payee for e in evaluate_script.load_examples(csv_path, reconciled_only=True)] == ["Old", "NewReconciled"]

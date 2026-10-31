@@ -24,7 +24,8 @@ CLASSIFIERS = {
 }
 
 
-def load_examples(path: Path) -> list[Example]:
+def load_examples(path: Path, since: date | None = None, reconciled_only: bool = False) -> list[Example]:
+    """Load labeled rows, optionally only those on/after `since` or marked reconciled in Actual."""
     with path.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     examples = [
@@ -36,6 +37,8 @@ def load_examples(path: Path) -> list[Example]:
         )
         for row in rows
         if row.get("category")
+        and (since is None or date.fromisoformat(row["date"]) >= since)
+        and (not reconciled_only or row.get("reconciled") == "1")
     ]
     return sorted(examples, key=lambda e: e.date)
 
@@ -77,10 +80,12 @@ def main() -> None:
     parser.add_argument("data", type=Path)
     parser.add_argument("--classifiers", default=",".join(CLASSIFIERS))
     parser.add_argument("--train-fraction", type=float, default=0.8)
+    parser.add_argument("--since", type=date.fromisoformat, help="only use transactions from this date (YYYY-MM-DD)")
+    parser.add_argument("--reconciled-only", action="store_true", help="only use transactions reconciled in Actual")
     parser.add_argument("--precision", type=float, default=0.95, help="target precision for auto-assignment")
     args = parser.parse_args()
 
-    examples = load_examples(args.data)
+    examples = load_examples(args.data, args.since, args.reconciled_only)
     train, test = time_split(examples, args.train_fraction)
     categories = sorted({e.category for e in examples})
     print(f"{len(examples)} labeled transactions, {len(categories)} categories; train {len(train)} / test {len(test)}")
