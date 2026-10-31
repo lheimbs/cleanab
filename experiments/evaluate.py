@@ -26,12 +26,19 @@ def _gliner() -> Classifier:
     return GlinerClassifier(descriptions=DESCRIPTIONS)
 
 
+def _decider() -> Classifier:
+    from cleanab.classifier.decider import DeciderClassifier
+
+    return DeciderClassifier(descriptions=DESCRIPTIONS)
+
+
 DESCRIPTIONS: dict[str, str] = {}
 
 CLASSIFIERS = {
     "exact-payee": ExactPayeeClassifier,
     "char-ngram-lr": CharNgramClassifier,
     "gliner2": _gliner,
+    "decider-4b": _decider,
 }
 
 
