@@ -14,7 +14,7 @@ sops exec-file ~/.config/cleanab/config.sops.yaml \
 
 It writes `experiments/data/transactions.csv` and prints, per month, how many transactions are
 categorized, uncategorized and reconciled. Use that table to decide from when on you trust the
-categories, then pass `--since YYYY-MM-DD` (and optionally `--reconciled-only`) to `evaluate`.
+categories, then pass `--since YYYY-MM-DD` and `--until YYYY-MM-DD` (and optionally `--reconciled-only`) to `evaluate`.
 Transfers and split transactions are skipped.
 
 ## Data
