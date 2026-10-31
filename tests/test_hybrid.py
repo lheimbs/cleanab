@@ -37,3 +37,10 @@ def test_new_payee_averages_fallbacks():
 def test_no_answer_abstains():
     hybrid = HybridClassifier([])
     assert hybrid.predict(Example("x"), ["A"]).category is None
+
+
+def test_known_classifier_answers_for_seen_payees():
+    known = Fixed({"A": 0.2, "B": 0.8})
+    hybrid = HybridClassifier([], known=known)
+    hybrid.fit([Example("rewe", category="A")])
+    assert hybrid.predict(Example("rewe"), ["A", "B"]).category == "B"

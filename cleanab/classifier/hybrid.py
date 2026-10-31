@@ -13,20 +13,24 @@ class HybridClassifier:
     not know, so an expensive model runs once per new payee instead of once per transaction.
     """
 
-    def __init__(self, fallbacks: list[Classifier], name: str = "hybrid") -> None:
+    def __init__(self, fallbacks: list[Classifier], name: str = "hybrid", known: Classifier | None = None) -> None:
+        """`known`, if given, answers for payees seen before (it can use the purpose text); else exact match."""
         self.name = name
+        self.known = known
         self.exact = ExactPayeeClassifier()
         self.fallbacks = fallbacks
 
     def fit(self, history: list[Example]) -> None:
         self.exact.fit(history)
+        if self.known and self.known not in self.fallbacks:
+            self.known.fit(history)
         for fallback in self.fallbacks:
             fallback.fit(history)
 
     def predict(self, example: Example, categories: list[str]) -> Prediction:
-        known = self.exact.predict(example, categories)
-        if known.category is not None:
-            return known
+        seen = self.exact.predict(example, categories)
+        if seen.category is not None:
+            return self.known.predict(example, categories) if self.known else seen
         totals = dict.fromkeys(categories, 0.0)
         answered = 0
         for fallback in self.fallbacks:
