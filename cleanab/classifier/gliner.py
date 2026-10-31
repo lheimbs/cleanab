@@ -57,12 +57,12 @@ class GlinerClassifier:
     def _load(self):
         if self._extractor is None:
             try:
-                from gliner2 import GLiNER2
+                from gliner2 import AutoExtractor
             except ImportError as exc:
                 raise RuntimeError(
                     'install the model extra: uv sync --group models (pip install "gliner2[local]")'
                 ) from exc
-            self._extractor = GLiNER2.from_pretrained(self.model_id)
+            self._extractor = AutoExtractor.from_pretrained(self.model_id)
         return self._extractor
 
     def _label_text(self, category: str) -> str:
@@ -71,7 +71,9 @@ class GlinerClassifier:
 
     def predict(self, example: Example, categories: list[str]) -> Prediction:
         by_text = {self._label_text(c): c for c in categories}
-        result = self._load().classify_text(model_text(example.payee, example.purpose), {"category": list(by_text)})
+        result = self._load().classify_text(
+            model_text(example.payee, example.purpose), {"category": list(by_text)}, include_confidence=True
+        )
         label, confidence, scores = parse_result(result, list(by_text))
         if label is None:
             return Prediction(None)

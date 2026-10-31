@@ -17,7 +17,7 @@ def test_parse_shapes():
 
 def test_predict_maps_descriptions_back():
     class Fake:
-        def classify_text(self, text, schema):
+        def classify_text(self, text, schema, include_confidence=False):
             assert "Bills: insurance" in schema["category"]
             return {"category": "Bills: insurance"}
 
