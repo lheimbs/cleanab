@@ -172,6 +172,7 @@ dev = [
     { name = "scikit-learn", version = "1.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
 models = [
+    { name = "decider-ai", extra = ["gguf"], marker = "python_full_version >= '3.11'" },
     { name = "gliner2", extra = ["local"] },
 ]
 
@@ -196,7 +197,10 @@ dev = [
     { name = "ruff", specifier = ">=0.8.0" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
 ]
-models = [{ name = "gliner2", extras = ["local"] }]
+models = [
+    { name = "decider-ai", extras = ["gguf"], marker = "python_full_version >= '3.11'" },
+    { name = "gliner2", extras = ["local"] },
+]
 
 [[package]]
 name = "click"
@@ -381,6 +385,47 @@ nvtx = [
 ]
 
 [[package]]
+name = "decider-ai"
+version = "1.10.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "flash-linear-attention" },
+    { name = "huggingface-hub" },
+    { name = "jinja2" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" } },
+    { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c3/09/fce7710b308ff03f586f01318955672a58f48870d05b0c609accdb16e7d5/decider_ai-1.10.0.tar.gz", hash = "sha256:8ca5598f2d628e9805769e7fb73ea91a5bbdc7cc979eb8626edfcc602be8bb70", size = 288983, upload-time = "2026-10-20T12:20:43.331Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/bf/1df77c3ed44320d2b81083b2f30dc9d8d1a35978ac7eca4fb98302ad5f69/decider_ai-1.10.0-py3-none-any.whl", hash = "sha256:65f2e3134790994f891f605c0353381e4fb7cd1d331774cf1df39acfdd11484b", size = 253720, upload-time = "2026-10-20T12:20:41.757Z" },
+]
+
+[package.optional-dependencies]
+gguf = [
+    { name = "llama-cpp-python" },
+]
+
+[[package]]
+name = "diskcache"
+version = "5.6.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3f/21/1c1ffc1a039ddcc459db43cc108658f32c57d271d7289a2794e401d0fdb6/diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc", size = 67916, upload-time = "2023-08-31T06:12:00.316Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/27/4570e78fc0bf5ea0ca45eb1de3818a23787af9b390c0b0a0033a1b8236f9/diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19", size = 45550, upload-time = "2023-08-31T06:11:58.822Z" },
+]
+
+[[package]]
+name = "einops"
+version = "0.8.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz", hash = "sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827", size = 56261, upload-time = "2026-01-26T04:13:17.638Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl", hash = "sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193", size = 65638, upload-time = "2026-01-26T04:13:18.546Z" },
+]
+
+[[package]]
 name = "elementpath"
 version = "5.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -453,6 +498,31 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/56/48/d6cb2b23e0cd53dd34f215d7b8c60689230bdfeac75ed3e93f2115761d9a/fints-4.2.4.tar.gz", hash = "sha256:9ce2adc84a34d61fca89d695aafffd7b07f537c4c16015139a29c3706cc36591", size = 74325, upload-time = "2025-07-02T16:50:28.575Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fd/6c/61696f017a9574604aa53515e789aef02219820a0c2c20992c015c3cba3e/fints-4.2.4-py3-none-any.whl", hash = "sha256:1c502576e9b1b2eedd5a3da9d83bf2ac6bf7195b03997dfd7040d1c2be44cecd", size = 64799, upload-time = "2025-07-02T16:50:27.118Z" },
+]
+
+[[package]]
+name = "fla-core"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/49/2d/3181d715d021c12db379ce0bc51ba78c5b6282ff6c3c79cc2f64d183d1b2/fla_core-0.6.0.tar.gz", hash = "sha256:cdd5b7ff6d5c0e5c08fde73f2624d76e0b506f8684af4e316bc7f2d8bfd9a623", size = 775665, upload-time = "2026-10-23T17:48:03.213Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/08/a1a16725117cddded90bb11afed4b31f23d97f7f554775e66af998818ef9/fla_core-0.6.0-py3-none-any.whl", hash = "sha256:b0708b70e0b119cd58a0a5146ea56cb175cef6ed969d8ac60267e3e077ce3ebd", size = 1085221, upload-time = "2026-10-23T17:48:00.23Z" },
+]
+
+[[package]]
+name = "flash-linear-attention"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fla-core" },
+    { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/2f/6e07920d032e97fcc1a09d7578a7aa595b7dece535280bd712bb7077a3fa/flash_linear_attention-0.6.0.tar.gz", hash = "sha256:4110ff0f94ca54b76fc5499f0c169f5cbd44738d875e0199adc3a11ab0e241fa", size = 222155, upload-time = "2026-10-23T17:48:04.341Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/c1/ad271e49528b06c7032c35e6dca85592f96ef8390e6ce1b803d6b23eae0a/flash_linear_attention-0.6.0-py3-none-any.whl", hash = "sha256:6dec9735f8454523c13553622e98aff30152dde6586b4ac7d88010fbb7a06b5f", size = 403549, upload-time = "2026-10-23T17:48:01.882Z" },
 ]
 
 [[package]]
@@ -614,6 +684,19 @@ sdist = { url = "https://files.pythonhosted.org/packages/d5/1d/537ab090f302b8389
 wheels = [
     { url = "https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl", hash = "sha256:3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba", size = 306115, upload-time = "2026-08-31T09:39:02.298Z" },
 ]
+
+[[package]]
+name = "llama-cpp-python"
+version = "0.3.36"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "diskcache" },
+    { name = "jinja2" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ec/e9/e7de2b0463ea3ffbf0ede6cb21b58c1258a8f6521aae45ca773a59fe7cf3/llama_cpp_python-0.3.36.tar.gz", hash = "sha256:832db0699007f1be95a7e41ef12e88926b02ba836461e36a36372db2760c1a2e", size = 76589250, upload-time = "2026-10-01T05:48:01.345Z" }
 
 [[package]]
 name = "logzero"
