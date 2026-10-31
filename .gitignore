@@ -6,3 +6,4 @@ config.yaml
 __pycache__
 .sops.yaml
 config.sops.yaml
+experiments/data/

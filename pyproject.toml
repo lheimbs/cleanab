@@ -20,8 +20,17 @@ dependencies = [
 [project.scripts]
 pycleanab = "cleanab.cli:cli"
 
+[project.optional-dependencies]
+ml-lite = [
+    "scikit-learn>=1.7.2",
+]
+
 [dependency-groups]
-dev = ["ruff>=0.8.0", "pytest>=8"]
+dev = [
+    "ruff>=0.8.0",
+    "pytest>=8",
+    "scikit-learn>=1.7.2",
+]
 
 [tool.uv]
 
