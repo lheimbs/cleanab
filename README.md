@@ -50,6 +50,38 @@ Use `--test` while tuning your `replacements`, so the bank is only queried once.
 `config.yaml` contains your FinTS credentials in plaintext. Keep it out of version control (it is gitignored) and restrict its file permissions.
 Holding (depot) accounts are not supported yet and are skipped.
 
+### Tip: encrypting your config with sops
+
+To keep your credentials encrypted at rest, you can use [sops](https://github.com/getsops/sops).
+Keep the encrypted config outside this repository, e.g. in `~/.config/cleanab/`, together with a `.sops.yaml` that encrypts only the secret fields (so your `replacements` stay readable):
+
+```yaml
+# ~/.config/cleanab/.sops.yaml
+creation_rules:
+  - path_regex: config\.sops\.yaml$
+    pgp: "<your GPG key fingerprint>"  # or `age: <recipient>`
+    encrypted_regex: "^(access_token|budget_id|cash_account_id|auto_import_secret|personal_access_token|actual_api_key|actual_sync_id|fints_username|fints_password|fints_product_id|iban)$"
+```
+
+```sh
+cd ~/.config/cleanab
+cp /path/to/config.yaml config.sops.yaml
+sops encrypt -i config.sops.yaml   # encrypt in place
+sops edit config.sops.yaml         # edit later
+```
+
+Run cleanab with the decrypted config passed via a temporary FIFO, so plaintext never touches the disk:
+
+```sh
+sops exec-file ~/.config/cleanab/config.sops.yaml 'uv run python -m cleanab -c {}'
+
+# or with Docker (--no-fifo uses a temp file, which is removed afterwards)
+sops exec-file --no-fifo ~/.config/cleanab/config.sops.yaml \
+  'docker run --rm -it -v {}:/app/config.yaml:ro cleanab'
+```
+
+Don't pipe the decrypted config via stdin (`-c -`): the bank may need stdin to ask for a TAN.
+
 ## Development
 
 ```sh
