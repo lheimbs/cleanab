@@ -19,9 +19,19 @@ from cleanab.classifier.baselines import CharNgramClassifier, ExactPayeeClassifi
 from cleanab.classifier.metrics import evaluate
 from cleanab.classifier.normalize import normalize_text
 
+
+def _gliner() -> Classifier:
+    from cleanab.classifier.gliner import GlinerClassifier
+
+    return GlinerClassifier(descriptions=DESCRIPTIONS)
+
+
+DESCRIPTIONS: dict[str, str] = {}
+
 CLASSIFIERS = {
     "exact-payee": ExactPayeeClassifier,
     "char-ngram-lr": CharNgramClassifier,
+    "gliner2": _gliner,
 }
 
 
@@ -198,10 +208,17 @@ def main() -> None:
         "reports first occurrences of a payee separately",
     )
     parser.add_argument("--warmup", type=int, default=100, help="--online: transactions used only as initial history")
+    parser.add_argument(
+        "--descriptions", type=Path, help="YAML/JSON file mapping category name to a one-line description"
+    )
     parser.add_argument("--errors", type=int, default=0, metavar="N", help="list the N most confident mistakes")
     parser.add_argument("--precision", type=float, default=0.95, help="target precision for auto-assignment")
     args = parser.parse_args()
 
+    if args.descriptions:
+        import yaml
+
+        DESCRIPTIONS.update(yaml.safe_load(args.descriptions.read_text(encoding="utf-8")) or {})
     examples = load_examples(args.data, args.since, args.until, args.reconciled_only)
     categories = sorted({e.category for e in examples})
     if args.online:
