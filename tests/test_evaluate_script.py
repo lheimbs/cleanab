@@ -70,3 +70,13 @@ def test_load_examples_filters_since_and_reconciled(evaluate_script, tmp_path):
     since = date(2024, 1, 1)
     assert [e.payee for e in evaluate_script.load_examples(csv_path, since=since)] == ["NewReconciled", "NewOpen"]
     assert [e.payee for e in evaluate_script.load_examples(csv_path, reconciled_only=True)] == ["Old", "NewReconciled"]
+
+
+def test_load_examples_filters_until(evaluate_script, tmp_path):
+    csv_path = tmp_path / "t.csv"
+    csv_path.write_text(
+        "date,payee,purpose,category\n2023-12-31,A,,Cat\n2024-03-31,B,,Cat\n2024-04-01,C,,Cat\n",
+        encoding="utf-8",
+    )
+    examples = evaluate_script.load_examples(csv_path, since=date(2023, 1, 1), until=date(2024, 3, 31))
+    assert [e.payee for e in examples] == ["A", "B"]
