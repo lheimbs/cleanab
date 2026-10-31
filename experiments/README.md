@@ -43,3 +43,14 @@ fold) and list the most confident mistakes:
 uv run python -m experiments.evaluate experiments/data/transactions.csv \
   --since 2023-01-01 --until 2024-03-31 --group-cv 5 --errors 15
 ```
+
+## Replaying an import (online mode)
+
+The most realistic test: replay transactions in date order, predicting each one from the history before
+it, then adding it to the history as if you had confirmed it. First occurrences of a payee (where a model
+has to help) are reported separately from repeats (which the history already covers):
+
+```sh
+uv run python -m experiments.evaluate experiments/data/transactions.csv \
+  --since 2023-01-01 --until 2024-03-31 --online --warmup 100 --errors 15
+```
