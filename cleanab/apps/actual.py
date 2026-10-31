@@ -5,7 +5,7 @@ from typing import Literal
 
 import requests
 from logzero import logger
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, ConfigDict, HttpUrl
 
 from ..classifier.base import Example
 from ..classifier.factory import build_classifier
@@ -18,6 +18,8 @@ REQUEST_TIMEOUT = 30
 class CategorizeConfig(BaseModel):
     """Suggest categories for new transactions, learned from the ones you already categorized in Actual."""
 
+    model_config = ConfigDict(extra="forbid")
+
     enabled: bool = False
     model: Literal["light", "full"] = "light"
     history_since: date = date(2020, 1, 1)
@@ -29,6 +31,8 @@ class CategorizeConfig(BaseModel):
 
 
 class ActualAppConfig(BaseAppConfig):
+    model_config = ConfigDict(extra="forbid")
+
     actual_api_url: HttpUrl
     actual_api_key: str
     actual_sync_id: str
