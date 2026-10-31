@@ -45,6 +45,23 @@ python -m cleanab [OPTIONS]
 
 Use `--test` while tuning your `replacements`, so the bank is only queried once.
 
+## photoTAN / QR images over SSH
+
+If your bank asks you to scan a photoTAN or QR image, cleanab draws it into the terminal instead of opening an image
+viewer, so it also works over SSH. It picks the best method for your terminal:
+
+| `cleanab.tan_display` | Used when | Notes |
+| --- | --- | --- |
+| `kitty` | kitty, Ghostty, WezTerm | [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/), sharpest |
+| `iterm` | iTerm2 | inline images |
+| `blocks` | everything else, tmux/screen, SSH | truecolor half-blocks; needs a terminal at least ~60 columns wide |
+| `window` | local desktop session | opens the system image viewer |
+| `auto` (default) | | choose from the environment |
+
+Force a mode with `cleanab: {tan_display: blocks}` in the config or `CLEANAB_TAN_DISPLAY=blocks`. Inside tmux the
+graphics protocols need `allow-passthrough`, so `auto` uses `blocks` there. Zoom out the terminal font if a QR code is too
+large to fit on screen, or scan it from a distance.
+
 ## Security note
 
 `config.yaml` contains your FinTS credentials in plaintext. Keep it out of version control (it is gitignored) and restrict its file permissions.

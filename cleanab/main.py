@@ -9,6 +9,7 @@ from .cleaner import FieldCleaner
 from .fints import process_fints_account
 from .models import AccountConfig
 from .models.enums import AccountType
+from .tan_display import set_mode
 from .transactions import process_transaction
 
 
@@ -29,6 +30,7 @@ class Cleanab:
 
     def setup(self):
         self.today = date.today()
+        set_mode(self.config.cleanab.tan_display)
         self.setup_app_connections()
         for app in self.config.apps.keys():
             logger.info(f"Loaded App {app}")

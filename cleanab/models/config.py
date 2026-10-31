@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from logzero import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -21,6 +21,8 @@ class CleanabConfig(BaseModel):
     minimum_holdings_delta: Annotated[float, Field(ge=0)] = 1
     debug: bool = False
     fints_product_id: str | None = None
+    # How to show photoTAN/QR images: auto, kitty, iterm, blocks (works over SSH) or window
+    tan_display: Literal["auto", "kitty", "iterm", "blocks", "window"] = "auto"
 
 
 NestedReplacementEntry = list[ReplacementDefinition | str]

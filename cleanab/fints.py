@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import time
 from functools import lru_cache
-from io import BytesIO
 from multiprocessing import Lock
 
 from fints.client import FinTS3PinTanClient, FinTSClientError, NeedTANResponse
 from fints.hhd.flicker import terminal_flicker_unix
 from logzero import logger
-from PIL import Image
 
 from .models.enums import AccountType
+from .tan_display import show_image
 
 lock = Lock()
 
@@ -58,10 +57,9 @@ def handle_tan_response(fints: FinTS3PinTanClient, tan_response: NeedTANResponse
             pass
     elif tan_response.challenge_matrix:
         logger.info("Please use your bank's app to scan the QR code.")
-        image_bytes = BytesIO(tan_response.challenge_matrix[1])
-        Image.open(image_bytes).show()
-        # Sleep a bit to give whatever application PIL uses to display the image time to start
-        time.sleep(5)
+        if show_image(tan_response.challenge_matrix[1]) == "window":
+            # Sleep a bit to give whatever application PIL uses to display the image time to start
+            time.sleep(5)
     else:
         logger.info(tan_response.challenge_html)
 
