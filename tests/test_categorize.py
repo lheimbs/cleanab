@@ -73,3 +73,11 @@ def test_failure_does_not_block_import(app, monkeypatch):
     txs = (new_tx("Rewe"),)
     assert app.prepare_transactions(txs) == txs
     assert "category" not in txs[0]
+
+
+def test_misplaced_or_misspelled_keys_are_rejected():
+    base = {"actual_api_url": "http://a/", "actual_api_key": "k", "actual_sync_id": "s", "actual_account_ids": ["a"]}
+    with pytest.raises(ValueError):
+        actual.Config(**base, categorise={"enabled": True})
+    with pytest.raises(ValueError):
+        actual.Config(**base, categorize={"enable": True})
