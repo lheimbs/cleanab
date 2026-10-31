@@ -80,3 +80,25 @@ def test_load_examples_filters_until(evaluate_script, tmp_path):
     )
     examples = evaluate_script.load_examples(csv_path, since=date(2023, 1, 1), until=date(2024, 3, 31))
     assert [e.payee for e in examples] == ["A", "B"]
+
+
+def test_group_folds_keep_payees_together(evaluate_script):
+    from cleanab.classifier.base import Example
+
+    examples = [Example(payee, category="x") for payee in ["EDEKA", "edeka", "Netflix", "Spotify"] * 3]
+    folds = evaluate_script.group_folds(examples, 3)
+    by_payee: dict[str, set[int]] = {}
+    for example, fold in zip(examples, folds, strict=True):
+        by_payee.setdefault(example.payee.lower(), set()).add(fold)
+    assert all(len(f) == 1 for f in by_payee.values())
+
+
+def test_grouped_cv_only_predicts_unseen_payees(evaluate_script, capsys):
+    from cleanab.classifier.base import Example
+
+    examples = [Example(f"shop{i % 10}", category="A" if i % 2 else "B", date=date(2024, 1, 1)) for i in range(60)]
+    evaluate_script.run_grouped_cv(evaluate_script.ExactPayeeClassifier, examples, ["A", "B"], 5, 0.95, errors=2)
+    output = capsys.readouterr().out
+    # exact-payee cannot know any held-out payee, so it must abstain on everything
+    assert "answered=0.000" in output
+    assert "unseen cv5" in output
