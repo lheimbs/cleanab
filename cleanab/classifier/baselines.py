@@ -23,6 +23,9 @@ class ExactPayeeClassifier:
             if example.category and key:  # an empty key would lump unrelated payees together
                 self._by_payee[key][example.category] += 1
 
+    def knows(self, example: Example) -> bool:
+        return normalize_text(example.payee) in self._by_payee
+
     def predict(self, example: Example, categories: list[str]) -> Prediction:
         key = normalize_text(example.payee)
         counts = self._by_payee.get(key) if key else None
