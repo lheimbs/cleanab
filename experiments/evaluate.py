@@ -141,6 +141,42 @@ def run_grouped_cv(
         show_errors(name, all_test, predictions, errors)
 
 
+def run_online(
+    factory, examples: list[Example], categories: list[str], warmup: int, target: float, errors: int = 0
+) -> None:
+    """Replay the transactions in date order, as a real import would see them.
+
+    Each transaction is predicted from the history before it only, then added to the history (as if you had
+    confirmed the category). The first `warmup` transactions only build history. Results are split into
+    first occurrences of a payee (cold start, where a model has to earn its keep) and repeats (which the
+    history already covers).
+    """
+    classifier = factory()
+    seen: set[str] = set()
+    scored: list[tuple[Example, object, bool]] = []
+    started = time.perf_counter()
+    for index, example in enumerate(examples):
+        payee = normalize_text(example.payee)
+        if index >= warmup:
+            scored.append((example, classifier.predict(example, categories), payee not in seen))
+        seen.add(payee)
+        classifier.fit(examples[: index + 1])
+    elapsed = time.perf_counter() - started
+
+    name = classifier.name
+    distinct_cold = len({normalize_text(e.payee) for e, _, cold in scored if cold})
+    print(f"{name}: scored {len(scored)} transactions, {sum(c for _, _, c in scored)} first occurrences")
+    for label, keep in (("all", lambda c: True), ("first occurr.", lambda c: c), ("repeat", lambda c: not c)):
+        chosen = [(e, p) for e, p, cold in scored if keep(cold)]
+        if chosen:
+            print_report(name, label, [p for _, p in chosen], [e.category for e, _ in chosen], target)
+    print(f"{name:16} {'latency':13} {elapsed / max(len(scored), 1) * 1000:.1f} ms/transaction (incl. refitting)")
+    if errors:
+        cold = [(e, p) for e, p, is_cold in scored if is_cold]
+        show_errors(name + " (first occurrences)", [e for e, _ in cold], [p for _, p in cold], errors)
+    print(f"({distinct_cold} distinct first-occurrence payees)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("data", type=Path)
@@ -155,12 +191,26 @@ def main() -> None:
         metavar="K",
         help="instead of the chronological split, run K-fold cross-validation with payees held out",
     )
+    parser.add_argument(
+        "--online",
+        action="store_true",
+        help="replay in date order, predicting each transaction from earlier history only; "
+        "reports first occurrences of a payee separately",
+    )
+    parser.add_argument("--warmup", type=int, default=100, help="--online: transactions used only as initial history")
     parser.add_argument("--errors", type=int, default=0, metavar="N", help="list the N most confident mistakes")
     parser.add_argument("--precision", type=float, default=0.95, help="target precision for auto-assignment")
     args = parser.parse_args()
 
     examples = load_examples(args.data, args.since, args.until, args.reconciled_only)
     categories = sorted({e.category for e in examples})
+    if args.online:
+        print(
+            f"{len(examples)} labeled transactions, {len(categories)} categories; online replay, warmup {args.warmup}"
+        )
+        for name in args.classifiers.split(","):
+            run_online(CLASSIFIERS[name], examples, categories, args.warmup, args.precision, args.errors)
+        return
     if args.group_cv:
         print(
             f"{len(examples)} labeled transactions, {len(categories)} categories; payee-grouped {args.group_cv}-fold CV"

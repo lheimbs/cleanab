@@ -102,3 +102,15 @@ def test_grouped_cv_only_predicts_unseen_payees(evaluate_script, capsys):
     # exact-payee cannot know any held-out payee, so it must abstain on everything
     assert "answered=0.000" in output
     assert "unseen cv5" in output
+
+
+def test_online_replay_separates_first_occurrences(evaluate_script, capsys):
+    from cleanab.classifier.base import Example
+
+    payees = ["Edeka", "Netflix", "Edeka", "Netflix", "Edeka", "Rewe", "Netflix", "Edeka"]
+    category = {"Edeka": "Food", "Rewe": "Food", "Netflix": "Subs"}
+    examples = [Example(p, category=category[p], date=date(2024, 1, i + 1)) for i, p in enumerate(payees)]
+    evaluate_script.run_online(evaluate_script.ExactPayeeClassifier, examples, ["Food", "Subs"], warmup=2, target=0.9)
+    output = capsys.readouterr().out
+    assert "scored 6 transactions, 1 first occurrences" in output  # only Rewe is new after the warmup
+    assert "first occurr." in output and "repeat" in output
