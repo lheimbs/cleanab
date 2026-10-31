@@ -94,7 +94,7 @@ class Cleanab:
             return
 
         for i, app_connection in enumerate(self.config.get_apps()):
-            transactions = processed_transactions[i]
+            transactions = app_connection.prepare_transactions(processed_transactions[i])
             if self.dry_run:
                 logger.info("Dry-run, not creating transactions")
                 if intermediary := app_connection.create_intermediary(transactions):

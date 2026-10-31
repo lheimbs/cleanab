@@ -56,6 +56,10 @@ class BaseApp(ABC):
     def augment_transaction(self, transaction, account):
         pass
 
+    def prepare_transactions(self, transactions: tuple) -> tuple:
+        """Hook run before both dry-run and import, e.g. to add suggested categories. Default: unchanged."""
+        return transactions
+
     @abstractmethod
     def create_intermediary(self, transactions: tuple) -> str:
         return ""

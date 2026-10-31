@@ -138,3 +138,11 @@ def test_run_without_transactions_does_nothing(make_cleanab, fints):
     cleanab = make_cleanab()
     cleanab.run()
     assert cleanab.config.get_apps()[0].created == []
+
+
+def test_prepare_transactions_runs_for_dry_run_and_import(make_cleanab, fints, monkeypatch):
+    seen = []
+    monkeypatch.setattr(FakeApp, "prepare_transactions", lambda self, txs: seen.append(len(txs)) or txs, raising=False)
+    make_cleanab(apps=1, dry_run=True).run()
+    make_cleanab(apps=1).run()
+    assert seen == [2, 2]

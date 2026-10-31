@@ -45,6 +45,34 @@ python -m cleanab [OPTIONS]
 
 Use `--test` while tuning your `replacements`, so the bank is only queried once.
 
+## Category suggestions (Actual Budget, optional)
+
+cleanab can fill in the category of new transactions, learned from the ones you already categorized in Actual.
+It is off by default. Enable it in the `actual` app section:
+
+```yaml
+apps:
+  actual:
+    # ...
+    categorize:
+      enabled: true
+      model: light            # light: payee history + char n-grams; full: also a local zero-shot model
+      history_since: 2023-01-01   # only learn from the period you have verified
+      history_until: 2024-03-31
+      min_confidence: 0.5     # known payees are assigned above this
+      assign_new_payees: false    # new payees are only logged as suggestions unless this is true
+      descriptions:           # optional, used by `full`
+        Food: groceries, drugstores, bakeries, cafes
+```
+
+- Transactions already in Actual (same `imported_id`) are never touched, so existing categories are not overwritten.
+- Payees seen before get their usual category; new payees only get a logged suggestion by default.
+- Try it with `--dry-run`: the log shows `Category …` and `Suggested category …` lines and the intermediary contains the category ids.
+- `light` needs `uv sync --extra ml-lite`. `full` needs `uv sync --group models` and Python 3.11+ and downloads a
+  ~2.7 GB model on first use; the model runs locally and only once per new payee.
+- On a validated 15-month history, `light` got about 92% right overall and `full` about 94%
+  (75% on never-seen payees, against 59% for `light`). See [experiments/README.md](experiments/README.md).
+
 ## Security note
 
 `config.yaml` contains your FinTS credentials in plaintext. Keep it out of version control (it is gitignored) and restrict its file permissions.
