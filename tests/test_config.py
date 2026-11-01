@@ -113,3 +113,9 @@ def test_configured_replacements_are_applied(account_data):
     )
     cleaner = FieldCleaner(config.replacements, config.finalizer)
     assert cleaner.clean({"applicant_name": "Foo Gmbh"})["applicant_name"] == "Foo GmbH"
+
+
+def test_tan_display_is_case_insensitive():
+    from cleanab.models.config import CleanabConfig
+
+    assert CleanabConfig(tan_display=" Blocks ").tan_display == "blocks"

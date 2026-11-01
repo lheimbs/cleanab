@@ -2,12 +2,13 @@ from datetime import date
 from typing import Annotated
 
 from logzero import logger
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.main import create_model
 
 from cleanab.apps.base import BaseApp, _AppConfigValidator, load_app
 
 from ..constants import FIELDS_TO_CLEAN_UP
+from ..tan_display import TanDisplayMode
 from .account_config import AccountConfig
 from .cleaner import FinalizerDefinition, ReplacementDefinition
 
@@ -21,6 +22,14 @@ class CleanabConfig(BaseModel):
     minimum_holdings_delta: Annotated[float, Field(ge=0)] = 1
     debug: bool = False
     fints_product_id: str | None = None
+    # How to show photoTAN/QR images: auto, kitty, iterm, blocks (works over SSH) or window
+    tan_display: TanDisplayMode = "auto"
+
+    @field_validator("tan_display", mode="before")
+    @classmethod
+    def _normalise_tan_display(cls, value):
+        # Same leniency as the CLEANAB_TAN_DISPLAY override: "Blocks " works too.
+        return value.strip().lower() if isinstance(value, str) else value
 
 
 NestedReplacementEntry = list[ReplacementDefinition | str]

@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 
+import pytest
 from fints.client import NeedTANResponse
+from fints.exceptions import FinTSConnectionError
 
 from cleanab import fints as fints_module
 from cleanab.models.enums import AccountType
@@ -61,6 +63,15 @@ def test_bootstrap_asks_when_multiple_mechanisms(monkeypatch):
     assert client._mechanism == "921"
 
 
+def test_bootstrap_asks_again_for_invalid_choice(monkeypatch):
+    client = FakeClient(mechanism=None)
+    client.mechanisms["921"] = SimpleNamespace(security_function="921", name="Other")
+    answers = iter(["a", "5", "²", "1"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    fints_module.bootstrap_fints(client)
+    assert client._mechanism == "921"
+
+
 def tan_response():
     # Bypass __init__, which needs a real bank segment to parse the challenge from
     response = NeedTANResponse.__new__(NeedTANResponse)
@@ -91,31 +102,159 @@ def test_handle_tan_response_client_error(monkeypatch):
         raise fints_module.FinTSClientError("bad")
 
     monkeypatch.setattr("builtins.input", lambda _: "1")
-    assert fints_module.handle_tan_response(SimpleNamespace(send_tan=fail), tan_response()) == []
+    with pytest.raises(fints_module.TanFailed, match="bad"):
+        fints_module.handle_tan_response(SimpleNamespace(send_tan=fail), tan_response())
+
+
+def test_handle_tan_response_wraps_error_once(monkeypatch):
+    answers = iter([tan_response(), tan_response()])
+
+    def send_tan(response, tan):
+        answer = next(answers, None)
+        if answer is None:
+            raise fints_module.FinTSClientError("bad")
+        return answer
+
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    with pytest.raises(fints_module.TanFailed) as raised:
+        fints_module.handle_tan_response(SimpleNamespace(send_tan=send_tan), tan_response())
+    assert str(raised.value) == "Failed to send TAN: bad"
 
 
 def test_process_fints_account_unknown_iban(account, monkeypatch):
-    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a: (None, [SimpleNamespace(iban="DE00")]))
-    assert fints_module.process_fints_account(account, "a", "b", None) == []
+    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a, **kw: (None, [SimpleNamespace(iban="DE00")]))
+    assert fints_module.process_fints_account(account, "a", "b", None, tan_display="blocks") == []
 
 
 def test_process_fints_account_fetches_transactions(account, monkeypatch):
     sepa = SimpleNamespace(iban=account.iban)
-    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a: ("client", [sepa]))
     seen = {}
+
+    def fake_client(*args, tan_display):
+        seen.update(client_args=args, tan_display=tan_display)
+        return "client", [sepa]
 
     def fake_retrieve(sepa_account, client, *, start_date, end_date):
         seen.update(sepa=sepa_account, client=client, start=start_date, end=end_date)
         return ["tx"]
 
+    monkeypatch.setattr(fints_module, "get_fints_client", fake_client)
     monkeypatch.setattr(fints_module, "retrieve_transactions", fake_retrieve)
-    assert fints_module.process_fints_account(account, "start", "end", "pid") == ["tx"]
-    assert seen == {"sepa": sepa, "client": "client", "start": "start", "end": "end"}
+    assert fints_module.process_fints_account(account, "start", "end", "pid", tan_display="blocks") == ["tx"]
+    assert seen["tan_display"] == "blocks"
+    assert seen["client_args"][-1] == "pid"
+    assert (seen["sepa"], seen["client"], seen["start"], seen["end"]) == (sepa, "client", "start", "end")
 
 
 def test_process_fints_account_holdings(account, monkeypatch):
     account.account_type = AccountType.HOLDING
     sepa = SimpleNamespace(iban=account.iban)
-    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a: ("client", [sepa]))
+    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a, **kw: ("client", [sepa]))
     monkeypatch.setattr(fints_module, "retrieve_holdings", lambda s, c: ["h"])
-    assert fints_module.process_fints_account(account, "a", "b", None) == ["h"]
+    assert fints_module.process_fints_account(account, "a", "b", None, tan_display="blocks") == ["h"]
+
+
+def test_get_fints_client_cache_ignores_tan_display(monkeypatch):
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append((key, tan_display))
+        return "client", ["sepa"]
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    first = fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="kitty")
+    second = fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert first is second
+    assert connects == [(("blz", "user", "pw", "url", "pid"), "kitty")]
+
+
+def test_get_fints_client_does_not_retry_failed_login(monkeypatch):
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append(key)
+        raise fints_module.TanFailed("rejected")
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    with pytest.raises(fints_module.TanFailed):
+        fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    with pytest.raises(fints_module.LoginSkipped, match="already failed.*rejected"):
+        fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert len(connects) == 1
+
+
+def test_get_fints_client_retries_non_auth_errors(monkeypatch):
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append(key)
+        if len(connects) == 1:
+            raise FinTSConnectionError("timeout")
+        return "client", []
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    with pytest.raises(FinTSConnectionError):
+        fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks") == ("client", [])
+
+
+def test_get_fints_client_does_not_keep_the_exception(monkeypatch):
+    def fake_connect(*key, tan_display):
+        raise fints_module.TanFailed("rejected")
+
+    clients = {}
+    monkeypatch.setattr(fints_module, "_clients", clients)
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    with pytest.raises(fints_module.TanFailed):
+        fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert list(clients.values()) == ["rejected"]
+
+
+def test_rejected_tan_after_login_skips_other_accounts(account, monkeypatch):
+    sepa = SimpleNamespace(iban=account.iban)
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append(key)
+        return "client", [sepa]
+
+    def rejected(*args, **kwargs):
+        raise fints_module.TanFailed("rejected")
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    monkeypatch.setattr(fints_module, "retrieve_transactions", rejected)
+    with pytest.raises(fints_module.TanFailed):
+        fints_module.process_fints_account(account, "a", "b", "pid", tan_display="blocks")
+    with pytest.raises(fints_module.LoginSkipped, match="rejected"):
+        fints_module.process_fints_account(account, "a", "b", "pid", tan_display="blocks")
+    assert len(connects) == 1
+
+
+def test_get_fints_client_login_without_accounts_is_not_a_failure(monkeypatch):
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append(key)
+        return "client", []
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    assert fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks") == ("client", [])
+    assert fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks") == ("client", [])
+    assert len(connects) == 1
+
+
+def test_client_carries_tan_display():
+    client = fints_module.CleanabFinTSClient(
+        bank_identifier="12345678",
+        user_id="u",
+        pin="p",
+        server="https://bank.invalid",
+        product_id="x",
+        tan_display="iterm",
+    )
+    assert client.tan_display == "iterm"

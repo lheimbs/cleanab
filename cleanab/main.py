@@ -6,9 +6,10 @@ from logzero import logger
 from cleanab.models.config import Config
 
 from .cleaner import FieldCleaner
-from .fints import process_fints_account
+from .fints import LoginSkipped, process_fints_account
 from .models import AccountConfig
 from .models.enums import AccountType
+from .tan_display import configured_mode
 from .transactions import process_transaction
 
 
@@ -29,6 +30,8 @@ class Cleanab:
 
     def setup(self):
         self.today = date.today()
+        # Only the override is applied here; "auto" is resolved when the first TAN image needs showing.
+        self.tan_display = configured_mode(self.config.cleanab.tan_display)
         self.setup_app_connections()
         for app in self.config.apps.keys():
             logger.info(f"Loaded App {app}")
@@ -56,6 +59,7 @@ class Cleanab:
                 earliest=self.earliest,
                 latest=self.today,
                 product_id=self.config.cleanab.fints_product_id,
+                tan_display=self.tan_display,
             )
             account.write_account_cache(raw_transactions)
         return raw_transactions
@@ -81,6 +85,9 @@ class Cleanab:
                 account.write_cleaned_account_cache(processed_transactions)
 
             return processed_transactions
+        except LoginSkipped as e:
+            logger.warning("%s; skipping %s", e, account)
+            return []
         except Exception:
             logger.exception("Processing %s failed", account)
 
