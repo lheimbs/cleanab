@@ -20,8 +20,10 @@ def process_transaction(transaction, cleaner):
     amount = round(data["amount"].amount * 1000)
     applicant_name = data.get("applicant_name", None) or ""
     purpose = data.get("purpose", None) or ""
+    # A stable deduplication id for the apps, not a security measure; changing the hash would re-import everything.
     import_id = md5(
-        (entry_date.strftime("%Y-%m-%d") + applicant_name + purpose + str(amount)).encode("utf-8")
+        (entry_date.strftime("%Y-%m-%d") + applicant_name + purpose + str(amount)).encode("utf-8"),
+        usedforsecurity=False,
     ).hexdigest()
 
     local_data = data.copy()
