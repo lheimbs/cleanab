@@ -74,7 +74,8 @@ def _choose(count: int) -> int:
     """Ask for a menu entry until the answer is one of 0..count-1."""
     while True:
         choice = read_line("Choice: ").strip()
-        if choice.isdigit() and int(choice) < count:
+        # isdecimal, not isdigit: "²" is a digit that int() rejects.
+        if choice.isdecimal() and int(choice) < count:
             return int(choice)
         logger.error("Please enter a number from 0 to %d", count - 1)
 

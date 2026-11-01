@@ -59,7 +59,9 @@ viewer, so it also works over SSH. It picks the best method for your terminal:
 | `auto` (default) | | choose from the environment; on a local desktop, a hint suggests `window` if `blocks` is picked |
 
 Force a mode with `cleanab: {tan_display: blocks}` in the config or `CLEANAB_TAN_DISPLAY=blocks` (an invalid value is ignored with a warning). Upper/lower case doesn't matter. If a mode fails (for `window`: no desktop or no image viewer found), cleanab falls back to `blocks` in a terminal and still asks for the TAN. Inside
-tmux, screen or zellij the graphics protocols need passthrough, so `auto` uses `blocks` there. If stdout is not a terminal
+tmux, screen or zellij the graphics protocols need passthrough, so `auto` uses `blocks` there. A multiplexer on your
+local machine can't be detected over SSH when its `TERM` is not `screen*`/`tmux*` (e.g. tmux with
+`default-terminal "xterm-256color"`); if no image shows up, set `tan_display: blocks`. If stdout is not a terminal
 (cron, a log file), the image is only shown with `window`. Images are scaled down to fit the terminal; if the terminal is
 too small for `blocks` to keep the code scannable, cleanab warns and tells you the size it needs. `blocks` uses 24-bit color
 when `COLORTERM=truecolor` is set, otherwise 256 colors (16 on e.g. the Linux console). sshd doesn't forward `COLORTERM`;

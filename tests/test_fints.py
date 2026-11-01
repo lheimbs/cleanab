@@ -66,7 +66,7 @@ def test_bootstrap_asks_when_multiple_mechanisms(monkeypatch):
 def test_bootstrap_asks_again_for_invalid_choice(monkeypatch):
     client = FakeClient(mechanism=None)
     client.mechanisms["921"] = SimpleNamespace(security_function="921", name="Other")
-    answers = iter(["a", "5", "1"])
+    answers = iter(["a", "5", "²", "1"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
     fints_module.bootstrap_fints(client)
     assert client._mechanism == "921"

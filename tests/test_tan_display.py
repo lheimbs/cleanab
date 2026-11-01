@@ -307,17 +307,25 @@ def test_show_image_reencodes_other_formats(mode):
 
 
 class BrokenOut(io.StringIO):
+    """Writes the start of the image, then fails like a broken pipe or a Ctrl-C would."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
     def write(self, text):
-        if text.startswith("\x1b_G") or text.startswith("\x1b]1337"):
+        if self.error is not None:
+            error, self.error = self.error, None
             super().write(text[:10])
-            raise OSError("broken pipe")
+            raise error
         return super().write(text)
 
 
-@pytest.mark.parametrize(("mode", "terminator"), [("kitty", "\x1b\\"), ("iterm", "\x07")])
-def test_show_image_terminates_escape_after_failed_write(mode, terminator):
-    out = BrokenOut()
-    with pytest.raises(OSError):
+@pytest.mark.parametrize(("mode", "terminator"), [("kitty", "\x1b\\"), ("iterm", "\x07"), ("blocks", "\x1b[0m")])
+@pytest.mark.parametrize("error", [OSError("broken pipe"), KeyboardInterrupt()])
+def test_show_image_terminates_escape_after_failed_write(mode, terminator, error):
+    out = BrokenOut(error)
+    with pytest.raises(type(error)):
         tan_display.show_image(png_bytes(), mode=mode, out=out)
     assert out.getvalue().endswith(terminator + "\n")
 

@@ -36,8 +36,9 @@ _KITTY_CHUNK = 4096
 _MULTIPLEXER_VARS = ("TMUX", "STY", "ZELLIJ")
 # Cell size in pixels when the terminal doesn't report it.
 _DEFAULT_CELL = (10.0, 20.0)
-# String terminators of the kitty APC (ESC _ G ... ESC \\) and iTerm2 OSC (ESC ] 1337 ... BEL) sequences.
-_TERMINATORS = {"kitty": "\x1b\\\n", "iterm": "\x07\n"}
+# What ends a half-written image: the string terminators of the kitty APC (ESC _ G ... ESC \\) and iTerm2 OSC
+# (ESC ] 1337 ... BEL) sequences, and a color reset for blocks.
+_TERMINATORS = {"kitty": "\x1b\\\n", "iterm": "\x07\n", "blocks": "\x1b[0m\n"}
 # A 1x1 RGB query image (kitty docs, "Querying support"), followed by a primary device attributes request (DA1):
 # every terminal answers DA1, and one that speaks the graphics protocol answers the query before it.
 _KITTY_QUERY = b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c"
@@ -445,18 +446,19 @@ def show_image(data: bytes, mode: TanDisplayMode, out=None, *, image: Image.Imag
     if mode in ("kitty", "iterm"):
         build = kitty_sequence if mode == "kitty" else iterm_sequence
         sequence = build(as_png(data, image), fit_columns(image, out))
-        try:
-            out.write(sequence)
-        except Exception:
-            # A partial write leaves the terminal inside the escape string, swallowing everything after it.
-            with contextlib.suppress(Exception):
-                out.write(_TERMINATORS[mode])
-                out.flush()
-            raise
     else:
         columns, rows = terminal_box(out)
         image = flatten(image)
         warn_if_too_small(image, block_scale(image, columns, rows))
-        out.write(block_art(image, columns, rows, color_depth()))
-    out.flush()
+        sequence = block_art(image, columns, rows, color_depth())
+    try:
+        out.write(sequence)
+        out.flush()
+    except BaseException:
+        # A partial write (an error, or Ctrl-C over a slow link) leaves the terminal inside the escape string,
+        # swallowing everything after it, or with the block colors still set for the shell prompt.
+        with contextlib.suppress(Exception):
+            out.write(_TERMINATORS[mode])
+            out.flush()
+        raise
     return mode
