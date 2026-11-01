@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from multiprocessing import Lock
 
 from fints.client import FinTS3PinTanClient, FinTSClientError, NeedTANResponse
@@ -7,11 +8,20 @@ from fints.hhd.flicker import terminal_flicker_unix
 from logzero import logger
 
 from .models.enums import AccountType
-from .tan_display import TanDisplayMode, detect_mode, show_image
+from .tan_display import ImageDecodeError, TanDisplayMode, show_image
 
 lock = Lock()
-# Logged-in clients per bank login, so each login (and its TAN) happens once per run.
+# Logged-in clients per bank login, so each login (and its TAN) happens once per run. Bounded by the configured
+# bank logins; failed logins are not stored.
 _clients: dict[tuple, tuple] = {}
+
+
+class CleanabFinTSClient(FinTS3PinTanClient):
+    """A FinTS client that knows how to show TAN images, so the mode needn't be threaded through every call."""
+
+    def __init__(self, *args, tan_display: TanDisplayMode, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.tan_display: TanDisplayMode = tan_display
 
 
 def bootstrap_fints(fints: FinTS3PinTanClient):
@@ -47,20 +57,30 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
 
 
 def show_tan_image(data: bytes, mode: TanDisplayMode) -> None:
-    """Show the image, falling back to blocks; never let a display problem keep the user from entering the TAN."""
-    if mode == "auto":
-        # Resolve first, or a detected "blocks" would be attempted twice.
-        mode = detect_mode()
+    """Show the image in the resolved ``mode``, falling back to blocks on output problems.
+
+    Never let a display problem keep the user from entering the TAN.
+    """
+    if mode != "window" and not sys.stdout.isatty():
+        logger.warning(
+            "Not drawing the TAN image because stdout is not a terminal; "
+            "run cleanab interactively or set cleanab.tan_display: window"
+        )
+        return
     for attempt in dict.fromkeys((mode, "blocks")):
         try:
             show_image(data, attempt)
+            return
+        except ImageDecodeError as e:
+            # Every mode decodes the same way, so falling back can't help.
+            logger.error("%s", e)
             return
         except Exception:
             logger.exception("Could not show the TAN image with tan_display=%s", attempt)
     logger.error("Could not show the TAN image; try another cleanab.tan_display mode")
 
 
-def handle_tan_response(fints: FinTS3PinTanClient, tan_response: NeedTANResponse) -> list:
+def handle_tan_response(fints: CleanabFinTSClient, tan_response: NeedTANResponse) -> list:
     logger.info(f"TAN needed: {tan_response.challenge}")
 
     if tan_response.challenge_hhduc:
@@ -71,8 +91,7 @@ def handle_tan_response(fints: FinTS3PinTanClient, tan_response: NeedTANResponse
             pass
     elif tan_response.challenge_matrix:
         logger.info("Please use your bank's app to scan the QR code.")
-        # get_fints_client stores the resolved display mode on the client.
-        show_tan_image(tan_response.challenge_matrix[1], getattr(fints, "tan_display", "auto"))
+        show_tan_image(tan_response.challenge_matrix[1], fints.tan_display)
     else:
         logger.info(tan_response.challenge_html)
 
@@ -91,7 +110,7 @@ def handle_tan_response(fints: FinTS3PinTanClient, tan_response: NeedTANResponse
         return []
 
 
-def retrieve_transactions(sepa_account, fints: FinTS3PinTanClient, *, start_date, end_date):
+def retrieve_transactions(sepa_account, fints: CleanabFinTSClient, *, start_date, end_date):
     with fints:
         bootstrap_fints(fints)
         result = fints.get_transactions(sepa_account, start_date=start_date, end_date=end_date)
@@ -100,7 +119,7 @@ def retrieve_transactions(sepa_account, fints: FinTS3PinTanClient, *, start_date
     return [t.data for t in result]
 
 
-def retrieve_holdings(sepa_account, fints: FinTS3PinTanClient):
+def retrieve_holdings(sepa_account, fints: CleanabFinTSClient):
     with lock:
         bootstrap_fints(fints)
         holdings = fints.get_holdings(sepa_account)
@@ -112,9 +131,13 @@ def retrieve_holdings(sepa_account, fints: FinTS3PinTanClient):
 def get_fints_client(blz, username, password, endpoint, product_id, *, tan_display: TanDisplayMode):
     """The logged-in client for a bank login; ``tan_display`` is not part of the cache key."""
     key = (blz, username, password, endpoint, product_id)
-    if key not in _clients:
-        _clients[key] = _connect(*key, tan_display=tan_display)
-    return _clients[key]
+    if key in _clients:
+        return _clients[key]
+    result = _connect(*key, tan_display=tan_display)
+    # Don't remember a failed login (e.g. a rejected TAN), so the next account at this bank can try again.
+    if result[1]:
+        _clients[key] = result
+    return result
 
 
 def _connect(blz, username, password, endpoint, product_id, *, tan_display: TanDisplayMode):
@@ -124,14 +147,14 @@ def _connect(blz, username, password, endpoint, product_id, *, tan_display: TanD
         endpoint,
         product_id,
     )
-    fints = FinTS3PinTanClient(
+    fints = CleanabFinTSClient(
         bank_identifier=blz,
         user_id=username,
         pin=password,
         server=endpoint,
         product_id=product_id,
+        tan_display=tan_display,
     )
-    fints.tan_display = tan_display
     with lock:
         with fints:
             # Bootstrap the client to set up TAN mechanisms

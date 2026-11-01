@@ -132,7 +132,7 @@ def test_get_fints_client_cache_ignores_tan_display(monkeypatch):
 
     def fake_connect(*key, tan_display):
         connects.append((key, tan_display))
-        return "client", []
+        return "client", ["sepa"]
 
     monkeypatch.setattr(fints_module, "_clients", {})
     monkeypatch.setattr(fints_module, "_connect", fake_connect)
@@ -140,3 +140,30 @@ def test_get_fints_client_cache_ignores_tan_display(monkeypatch):
     second = fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
     assert first is second
     assert connects == [(("blz", "user", "pw", "url", "pid"), "kitty")]
+
+
+def test_get_fints_client_does_not_cache_failed_login(monkeypatch):
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append(key)
+        return "client", []
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    assert fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks") == ("client", [])
+    fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert len(connects) == 2
+    assert fints_module._clients == {}
+
+
+def test_client_carries_tan_display():
+    client = fints_module.CleanabFinTSClient(
+        bank_identifier="12345678",
+        user_id="u",
+        pin="p",
+        server="https://bank.invalid",
+        product_id="x",
+        tan_display="iterm",
+    )
+    assert client.tan_display == "iterm"

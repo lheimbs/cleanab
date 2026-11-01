@@ -1,5 +1,6 @@
 import base64
 import io
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -27,6 +28,9 @@ def png_bytes(size=(8, 8), color=(0, 0, 0), mode="RGB", fmt="PNG"):
         ({"TERM": "xterm-256color", "KONSOLE_VERSION": "240202"}, "kitty"),
         ({"TERM": "xterm-kitty", "TMUX": "/tmp/tmux"}, "blocks"),
         ({"TERM": "screen-256color"}, "blocks"),
+        ({"TERM": "tmux-256color", "LC_TERMINAL": "iTerm2"}, "blocks"),
+        ({"KITTY_WINDOW_ID": "1", "ZELLIJ": "0"}, "blocks"),
+        ({"KITTY_WINDOW_ID": "1", "STY": "1234.pts-0"}, "blocks"),
         ({"SSH_CONNECTION": "a b c d", "DISPLAY": ":0"}, "blocks"),
         ({"DISPLAY": ":0"}, "blocks"),
         ({"WAYLAND_DISPLAY": "wayland-0"}, "blocks"),
@@ -147,6 +151,60 @@ def test_show_image_passes_png_through_unchanged():
     assert base64.b64encode(data).decode() in out.getvalue()
 
 
+def test_show_image_flattens_transparent_png():
+    data = png_bytes(mode="RGBA", color=(0, 0, 0, 0))
+    out = io.StringIO()
+    tan_display.show_image(data, mode="kitty", out=out)
+    payload = "".join(c.split(";", 1)[1] for c in out.getvalue().split("\x1b\\") if c.strip())
+    image = Image.open(io.BytesIO(base64.b64decode(payload)))
+    assert image.mode == "RGB"
+    assert image.getpixel((0, 0)) == (255, 255, 255)
+
+
+@pytest.mark.parametrize(("mode", "flag"), [("kitty", ",c=19,"), ("iterm", ";width=19;")])
+def test_show_image_caps_graphics_at_terminal_size(mode, flag, monkeypatch):
+    monkeypatch.setattr(tan_display.shutil, "get_terminal_size", lambda fallback: os.terminal_size((20, 30)))
+    out = io.StringIO()
+    tan_display.show_image(png_bytes(size=(400, 100)), mode=mode, out=out)  # 40 cells at 10 px, 19 fit
+    assert flag in out.getvalue()
+
+
+def test_show_image_leaves_small_graphics_at_native_size(monkeypatch):
+    monkeypatch.setattr(tan_display.shutil, "get_terminal_size", lambda fallback: os.terminal_size((80, 24)))
+    out = io.StringIO()
+    tan_display.show_image(png_bytes(), mode="kitty", out=out)
+    assert out.getvalue().startswith("\x1b_Ga=T,f=100,m=")
+
+
+def stripes(module, count=30):
+    image = Image.new("RGB", (module * count, module * 4), "white")
+    for x in range(image.width):
+        if (x // module) % 2:
+            for y in range(image.height):
+                image.putpixel((x, y), (0, 0, 0))
+    return image
+
+
+@pytest.mark.parametrize("module", [1, 3, 5])
+def test_module_size(module):
+    assert tan_display.module_size(stripes(module)) == module
+
+
+@pytest.mark.parametrize(("scale", "warns"), [(1.0, False), (0.5, False), (0.3, True)])
+def test_warn_if_too_small(scale, warns, monkeypatch):
+    messages = []
+    monkeypatch.setattr(tan_display.logger, "warning", lambda msg, *a: messages.append(msg % a))
+    tan_display.warn_if_too_small(stripes(3), scale)
+    assert bool(messages) == warns
+    if warns:
+        assert "31 columns" in messages[0]
+
+
+def test_show_image_rejects_broken_image():
+    with pytest.raises(tan_display.ImageDecodeError):
+        tan_display.show_image(b"junk", mode="blocks", out=io.StringIO())
+
+
 @pytest.mark.parametrize("mode", ["CMYK", "RGBA"])
 def test_show_image_reencodes_other_formats(mode):
     color = (0, 0, 0, 0) if mode == "CMYK" else (0, 0, 0, 255)
@@ -173,9 +231,10 @@ def test_show_image_terminates_escape_after_failed_write(mode, terminator):
     assert out.getvalue().endswith(terminator + "\n")
 
 
-def test_unknown_mode_rejected():
+@pytest.mark.parametrize("mode", ["sixel", "auto"])
+def test_unknown_or_unresolved_mode_rejected(mode):
     with pytest.raises(ValueError, match="Unknown TAN display mode"):
-        tan_display.show_image(png_bytes(), mode="sixel", out=io.StringIO())
+        tan_display.show_image(png_bytes(), mode=mode, out=io.StringIO())
 
 
 def matrix_response():
@@ -184,7 +243,12 @@ def matrix_response():
     )
 
 
-def test_handle_tan_response_shows_matrix_image(monkeypatch):
+@pytest.fixture
+def tty(monkeypatch):
+    monkeypatch.setattr(fints_module.sys.stdout, "isatty", lambda: True, raising=False)
+
+
+def test_handle_tan_response_shows_matrix_image(monkeypatch, tty):
     shown = []
     monkeypatch.setattr(fints_module, "show_image", lambda data, mode: shown.append((data, mode)))
     monkeypatch.setattr("builtins.input", lambda _: "123456")
@@ -193,7 +257,7 @@ def test_handle_tan_response_shows_matrix_image(monkeypatch):
     assert shown == [(b"PNGDATA", "kitty")]
 
 
-def test_handle_tan_response_survives_display_failure(monkeypatch):
+def test_handle_tan_response_survives_display_failure(monkeypatch, tty):
     attempts = []
 
     def broken(data, mode):
@@ -207,14 +271,30 @@ def test_handle_tan_response_survives_display_failure(monkeypatch):
     assert attempts == ["kitty", "blocks"]
 
 
-def test_show_tan_image_resolves_auto_before_falling_back(monkeypatch):
+def test_show_tan_image_tries_blocks_once(monkeypatch, tty):
     attempts = []
 
     def broken(data, mode):
         attempts.append(mode)
-        raise OSError("cannot identify image file")
+        raise OSError("broken pipe")
 
     monkeypatch.setattr(fints_module, "show_image", broken)
-    monkeypatch.setattr(fints_module, "detect_mode", lambda: "blocks")
-    fints_module.show_tan_image(b"junk", "auto")
+    fints_module.show_tan_image(b"png", "blocks")
     assert attempts == ["blocks"]
+
+
+def test_show_tan_image_does_not_retry_decode_errors(monkeypatch, tty):
+    errors = []
+    monkeypatch.setattr(fints_module.logger, "exception", lambda *a: errors.append("traceback"))
+    monkeypatch.setattr(fints_module.logger, "error", lambda *a: errors.append("error"))
+    fints_module.show_tan_image(b"junk", "kitty")
+    assert errors == ["error"]
+
+
+@pytest.mark.parametrize(("mode", "shown"), [("blocks", False), ("window", True)])
+def test_show_tan_image_skips_terminal_modes_without_tty(mode, shown, monkeypatch):
+    calls = []
+    monkeypatch.setattr(fints_module.sys.stdout, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(fints_module, "show_image", lambda data, m: calls.append(m))
+    fints_module.show_tan_image(b"png", mode)
+    assert bool(calls) == shown
