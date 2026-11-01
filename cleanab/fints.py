@@ -131,13 +131,13 @@ def retrieve_holdings(sepa_account, fints: CleanabFinTSClient):
 def get_fints_client(blz, username, password, endpoint, product_id, *, tan_display: TanDisplayMode):
     """The logged-in client for a bank login; ``tan_display`` is not part of the cache key."""
     key = (blz, username, password, endpoint, product_id)
-    if key in _clients:
-        return _clients[key]
-    result = _connect(*key, tan_display=tan_display)
-    # Don't remember a failed login (e.g. a rejected TAN), so the next account at this bank can try again.
-    if result[1]:
-        _clients[key] = result
-    return result
+    if key not in _clients:
+        # Failed logins (e.g. a rejected TAN) are remembered too: logging in again for every other account at this
+        # bank would repeat the PIN/TAN attempt, and banks lock online banking after a few failures.
+        _clients[key] = _connect(*key, tan_display=tan_display)
+    elif not _clients[key][1]:
+        logger.warning("Skipping login for %s at %s, it already failed in this run", username, endpoint)
+    return _clients[key]
 
 
 def _connect(blz, username, password, endpoint, product_id, *, tan_display: TanDisplayMode):
