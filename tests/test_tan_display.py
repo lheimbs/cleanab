@@ -16,6 +16,12 @@ def png_bytes(size=(8, 8), color=(0, 0, 0), mode="RGB", fmt="PNG"):
     return buffer.getvalue()
 
 
+@pytest.fixture(autouse=True)
+def no_terminal_probe(monkeypatch):
+    """Never talk to the real terminal from tests; "can't tell" keeps the environment's guess."""
+    monkeypatch.setattr(tan_display, "kitty_graphics_supported", lambda: None)
+
+
 @pytest.mark.parametrize(
     ("env", "expected"),
     [
@@ -64,6 +70,33 @@ def test_resolve_mode_never_returns_auto():
     assert tan_display.resolve_mode("auto", {}) == "blocks"
 
 
+@pytest.mark.parametrize(
+    ("env", "supported", "expected"),
+    [
+        ({"KITTY_WINDOW_ID": "1"}, True, "kitty"),
+        ({"KITTY_WINDOW_ID": "1"}, None, "kitty"),
+        # Inherited from kitty/Konsole into a terminal without the graphics protocol.
+        ({"KITTY_WINDOW_ID": "1", "TERM": "xterm"}, False, "blocks"),
+        ({"KONSOLE_VERSION": "240202", "TERM_PROGRAM": "vscode"}, False, "blocks"),
+        ({"KONSOLE_VERSION": "240202", "TERM_PROGRAM": "WezTerm"}, False, "iterm"),
+    ],
+)
+def test_resolve_mode_confirms_kitty_with_the_terminal(env, supported, expected, monkeypatch):
+    monkeypatch.setattr(tan_display, "kitty_graphics_supported", lambda: supported)
+    assert tan_display.resolve_mode("auto", env) == expected
+
+
+def test_resolve_mode_does_not_probe_explicit_kitty(monkeypatch):
+    monkeypatch.setattr(tan_display, "kitty_graphics_supported", lambda: pytest.fail("probed"))
+    assert tan_display.resolve_mode("kitty", {}) == "kitty"
+
+
+def test_kitty_probe_needs_a_terminal(monkeypatch):
+    monkeypatch.undo()
+    monkeypatch.setattr(tan_display.sys, "stdin", io.StringIO())
+    assert tan_display.kitty_graphics_supported() is None
+
+
 @pytest.mark.parametrize(("env", "hint"), [({"DISPLAY": ":0"}, True), ({"WAYLAND_DISPLAY": "w"}, True), ({}, False)])
 def test_resolve_mode_hints_window_on_desktop(env, hint, monkeypatch):
     messages = []
@@ -77,9 +110,9 @@ def test_kitty_sequence_chunks_and_flags():
     sequence = tan_display.kitty_sequence(data)
     chunks = [c for c in sequence.split("\x1b\\") if c.strip()]
     assert len(chunks) == 4
-    assert chunks[0].startswith("\x1b_Ga=T,f=100,m=1;")
-    assert chunks[1].startswith("\x1b_Gm=1;")
-    assert chunks[-1].startswith("\x1b_Gm=0;")
+    assert chunks[0].startswith("\x1b_Ga=T,f=100,q=2,m=1;")
+    assert chunks[1].startswith("\x1b_Gq=2,m=1;")
+    assert chunks[-1].startswith("\x1b_Gq=2,m=0;")
     payload = "".join(c.split(";", 1)[1] for c in chunks)
     assert base64.b64decode(payload) == data
     assert all(len(c.split(";", 1)[1]) <= 4096 for c in chunks)
@@ -173,7 +206,7 @@ def test_show_image_leaves_small_graphics_at_native_size(monkeypatch):
     monkeypatch.setattr(tan_display.shutil, "get_terminal_size", lambda fallback: os.terminal_size((80, 24)))
     out = io.StringIO()
     tan_display.show_image(png_bytes(), mode="kitty", out=out)
-    assert out.getvalue().startswith("\x1b_Ga=T,f=100,m=")
+    assert out.getvalue().startswith("\x1b_Ga=T,f=100,q=2,m=")
 
 
 def stripes(module, count=30):
