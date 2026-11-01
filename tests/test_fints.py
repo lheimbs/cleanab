@@ -95,27 +95,48 @@ def test_handle_tan_response_client_error(monkeypatch):
 
 
 def test_process_fints_account_unknown_iban(account, monkeypatch):
-    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a: (None, [SimpleNamespace(iban="DE00")]))
-    assert fints_module.process_fints_account(account, "a", "b", None) == []
+    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a, **kw: (None, [SimpleNamespace(iban="DE00")]))
+    assert fints_module.process_fints_account(account, "a", "b", None, tan_display="blocks") == []
 
 
 def test_process_fints_account_fetches_transactions(account, monkeypatch):
     sepa = SimpleNamespace(iban=account.iban)
-    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a: ("client", [sepa]))
     seen = {}
 
-    def fake_retrieve(sepa_account, client, *, start_date, end_date, tan_display):
-        seen.update(sepa=sepa_account, client=client, start=start_date, end=end_date, tan_display=tan_display)
+    def fake_client(*args, tan_display):
+        seen.update(client_args=args, tan_display=tan_display)
+        return "client", [sepa]
+
+    def fake_retrieve(sepa_account, client, *, start_date, end_date):
+        seen.update(sepa=sepa_account, client=client, start=start_date, end=end_date)
         return ["tx"]
 
+    monkeypatch.setattr(fints_module, "get_fints_client", fake_client)
     monkeypatch.setattr(fints_module, "retrieve_transactions", fake_retrieve)
-    assert fints_module.process_fints_account(account, "start", "end", "pid", "blocks") == ["tx"]
-    assert seen == {"sepa": sepa, "client": "client", "start": "start", "end": "end", "tan_display": "blocks"}
+    assert fints_module.process_fints_account(account, "start", "end", "pid", tan_display="blocks") == ["tx"]
+    assert seen["tan_display"] == "blocks"
+    assert seen["client_args"][-1] == "pid"
+    assert (seen["sepa"], seen["client"], seen["start"], seen["end"]) == (sepa, "client", "start", "end")
 
 
 def test_process_fints_account_holdings(account, monkeypatch):
     account.account_type = AccountType.HOLDING
     sepa = SimpleNamespace(iban=account.iban)
-    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a: ("client", [sepa]))
-    monkeypatch.setattr(fints_module, "retrieve_holdings", lambda s, c, **kw: ["h"])
-    assert fints_module.process_fints_account(account, "a", "b", None) == ["h"]
+    monkeypatch.setattr(fints_module, "get_fints_client", lambda *a, **kw: ("client", [sepa]))
+    monkeypatch.setattr(fints_module, "retrieve_holdings", lambda s, c: ["h"])
+    assert fints_module.process_fints_account(account, "a", "b", None, tan_display="blocks") == ["h"]
+
+
+def test_get_fints_client_cache_ignores_tan_display(monkeypatch):
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append((key, tan_display))
+        return "client", []
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    first = fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="kitty")
+    second = fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert first is second
+    assert connects == [(("blz", "user", "pw", "url", "pid"), "kitty")]

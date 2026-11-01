@@ -7,7 +7,7 @@ Over SSH there is no desktop to open an image viewer on, so we draw into the ter
 - ``blocks``: truecolor half-block characters, which work in nearly every modern terminal
 - ``window``: open the image with the local image viewer (PIL); only used when you ask for it
 
-``auto`` (the default) picks a terminal mode from the environment and never ``window``.
+``auto`` (the default) picks a terminal mode from the environment at startup and never ``window``.
 Set ``cleanab.tan_display`` in the config or the
 ``CLEANAB_TAN_DISPLAY`` environment variable to force a mode.
 """
@@ -15,6 +15,7 @@ Set ``cleanab.tan_display`` in the config or the
 from __future__ import annotations
 
 import base64
+import contextlib
 import math
 import os
 import shutil
@@ -31,22 +32,35 @@ MODES: tuple[str, ...] = get_args(TanDisplayMode)
 ENV_VAR = "CLEANAB_TAN_DISPLAY"
 _KITTY_CHUNK = 4096
 _MAX_COLUMNS = 100
+# String terminators of the kitty APC (ESC _ G ... ESC \\) and iTerm2 OSC (ESC ] 1337 ... BEL) sequences.
+_TERMINATORS = {"kitty": "\x1b\\\n", "iterm": "\x07\n"}
 # Give whatever application PIL uses to display the image time to start.
 _WINDOW_DELAY = 5
 
 
 def resolve_mode(configured: TanDisplayMode = "auto", env: dict[str, str] | None = None) -> TanDisplayMode:
-    """Apply the CLEANAB_TAN_DISPLAY override; an invalid value is ignored with a warning instead of failing later."""
+    """Turn the configured mode into a concrete one (never ``auto``), once at startup.
+
+    The CLEANAB_TAN_DISPLAY override wins; an invalid value is ignored with a warning instead of failing later.
+    """
     env = os.environ if env is None else env
+    mode = configured
     override = env.get(ENV_VAR, "").strip().lower()
-    if not override:
-        return configured
-    if override not in MODES:
+    if override in MODES:
+        mode = override  # type: ignore[assignment]
+    elif override:
         logger.warning(
             "Ignoring %s=%r, expected one of %s; using %r", ENV_VAR, env[ENV_VAR], ", ".join(MODES), configured
         )
-        return configured
-    return override  # type: ignore[return-value]
+    if mode != "auto":
+        return mode
+    mode = detect_mode(env)
+    if mode == "blocks" and (env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")):
+        logger.info(
+            "TAN images will be drawn with text blocks; if your bank app can't scan them, set "
+            "cleanab.tan_display: window to open them in the image viewer instead"
+        )
+    return mode
 
 
 def detect_mode(env: dict[str, str] | None = None) -> TanDisplayMode:
@@ -55,10 +69,17 @@ def detect_mode(env: dict[str, str] | None = None) -> TanDisplayMode:
     # Inside tmux/screen, graphics escape sequences are swallowed unless passthrough is configured.
     if env.get("TMUX") or term.startswith("screen"):
         return "blocks"
-    if env.get("KITTY_WINDOW_ID") or "kitty" in term or "ghostty" in term or program == "ghostty":
+    if (
+        env.get("KITTY_WINDOW_ID")
+        or "kitty" in term
+        or "ghostty" in term
+        or program == "ghostty"
+        # Konsole keeps TERM=xterm-256color but supports the kitty graphics protocol.
+        or env.get("KONSOLE_VERSION")
+    ):
         return "kitty"
     # WezTerm only speaks the kitty protocol with enable_kitty_graphics, but iTerm2 images work out of the box.
-    if program in ("iTerm.app", "WezTerm") or env.get("LC_TERMINAL") == "iTerm2":
+    if program in ("iTerm.app", "WezTerm", "mintty") or env.get("LC_TERMINAL") == "iTerm2":
         return "iterm"
     # Never guess "window": multiplexers and session managers (tmux, herdr, ...) drop SSH_* variables while the
     # machine still has a desktop, so the viewer would open on the remote screen. Opt in with tan_display: window.
@@ -116,10 +137,18 @@ def block_art(image: Image.Image, columns: int, rows: int | None = None) -> str:
     lines = []
     for y in range(0, image.height, 2):
         cells = []
+        fg = bg = None
         for x in range(image.width):
             top = pixels[x, y]
             bottom = pixels[x, y + 1] if y + 1 < image.height else (255, 255, 255)
-            cells.append("\x1b[38;2;{};{};{}m\x1b[48;2;{};{};{}m▀".format(*top, *bottom))
+            # Only emit colors that changed: QR codes are mostly runs, which keeps the output small over SSH.
+            if top != fg:
+                cells.append("\x1b[38;2;{};{};{}m".format(*top))
+                fg = top
+            if bottom != bg:
+                cells.append("\x1b[48;2;{};{};{}m".format(*bottom))
+                bg = bottom
+            cells.append("▀")
         lines.append("".join(cells) + "\x1b[0m")
     return "\n".join(lines) + "\n"
 
@@ -138,7 +167,15 @@ def show_image(data: bytes, mode: TanDisplayMode = "auto", out=None) -> TanDispl
         time.sleep(_WINDOW_DELAY)
         return mode
     if mode in ("kitty", "iterm"):
-        out.write((kitty_sequence if mode == "kitty" else iterm_sequence)(as_png(data, image)))
+        sequence = (kitty_sequence if mode == "kitty" else iterm_sequence)(as_png(data, image))
+        try:
+            out.write(sequence)
+        except Exception:
+            # A partial write leaves the terminal inside the escape string, swallowing everything after it.
+            with contextlib.suppress(Exception):
+                out.write(_TERMINATORS[mode])
+                out.flush()
+            raise
     else:
         size = shutil.get_terminal_size((80, 24))
         # Leave one column against wrapping and two rows for the TAN prompt.

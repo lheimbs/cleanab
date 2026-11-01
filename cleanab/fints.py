@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from multiprocessing import Lock
 
 from fints.client import FinTS3PinTanClient, FinTSClientError, NeedTANResponse
@@ -8,9 +7,11 @@ from fints.hhd.flicker import terminal_flicker_unix
 from logzero import logger
 
 from .models.enums import AccountType
-from .tan_display import TanDisplayMode, show_image
+from .tan_display import TanDisplayMode, detect_mode, show_image
 
 lock = Lock()
+# Logged-in clients per bank login, so each login (and its TAN) happens once per run.
+_clients: dict[tuple, tuple] = {}
 
 
 def bootstrap_fints(fints: FinTS3PinTanClient):
@@ -47,6 +48,9 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
 
 def show_tan_image(data: bytes, mode: TanDisplayMode) -> None:
     """Show the image, falling back to blocks; never let a display problem keep the user from entering the TAN."""
+    if mode == "auto":
+        # Resolve first, or a detected "blocks" would be attempted twice.
+        mode = detect_mode()
     for attempt in dict.fromkeys((mode, "blocks")):
         try:
             show_image(data, attempt)
@@ -56,9 +60,7 @@ def show_tan_image(data: bytes, mode: TanDisplayMode) -> None:
     logger.error("Could not show the TAN image; try another cleanab.tan_display mode")
 
 
-def handle_tan_response(
-    fints: FinTS3PinTanClient, tan_response: NeedTANResponse, tan_display: TanDisplayMode = "auto"
-) -> list:
+def handle_tan_response(fints: FinTS3PinTanClient, tan_response: NeedTANResponse) -> list:
     logger.info(f"TAN needed: {tan_response.challenge}")
 
     if tan_response.challenge_hhduc:
@@ -69,7 +71,8 @@ def handle_tan_response(
             pass
     elif tan_response.challenge_matrix:
         logger.info("Please use your bank's app to scan the QR code.")
-        show_tan_image(tan_response.challenge_matrix[1], tan_display)
+        # get_fints_client stores the resolved display mode on the client.
+        show_tan_image(tan_response.challenge_matrix[1], getattr(fints, "tan_display", "auto"))
     else:
         logger.info(tan_response.challenge_html)
 
@@ -79,7 +82,7 @@ def handle_tan_response(
         response = fints.send_tan(tan_response, tan)
         if isinstance(response, NeedTANResponse):
             logger.error("TAN was not accepted, please try again.")
-            return handle_tan_response(fints, response, tan_display)
+            return handle_tan_response(fints, response)
         else:
             logger.info("TAN accepted, proceeding with the request.")
             return response
@@ -88,28 +91,33 @@ def handle_tan_response(
         return []
 
 
-def retrieve_transactions(
-    sepa_account, fints: FinTS3PinTanClient, *, start_date, end_date, tan_display: TanDisplayMode = "auto"
-):
+def retrieve_transactions(sepa_account, fints: FinTS3PinTanClient, *, start_date, end_date):
     with fints:
         bootstrap_fints(fints)
         result = fints.get_transactions(sepa_account, start_date=start_date, end_date=end_date)
         if isinstance(result, NeedTANResponse):
-            result = handle_tan_response(fints, result, tan_display)
+            result = handle_tan_response(fints, result)
     return [t.data for t in result]
 
 
-def retrieve_holdings(sepa_account, fints: FinTS3PinTanClient, *, tan_display: TanDisplayMode = "auto"):
+def retrieve_holdings(sepa_account, fints: FinTS3PinTanClient):
     with lock:
         bootstrap_fints(fints)
         holdings = fints.get_holdings(sepa_account)
         if isinstance(holdings, NeedTANResponse):
-            holdings = handle_tan_response(fints, holdings, tan_display)
+            holdings = handle_tan_response(fints, holdings)
     return [{"total_value": h.total_value} for h in holdings]
 
 
-@lru_cache(maxsize=8)
-def get_fints_client(blz, username, password, endpoint, product_id, tan_display: TanDisplayMode = "auto"):
+def get_fints_client(blz, username, password, endpoint, product_id, *, tan_display: TanDisplayMode):
+    """The logged-in client for a bank login; ``tan_display`` is not part of the cache key."""
+    key = (blz, username, password, endpoint, product_id)
+    if key not in _clients:
+        _clients[key] = _connect(*key, tan_display=tan_display)
+    return _clients[key]
+
+
+def _connect(blz, username, password, endpoint, product_id, *, tan_display: TanDisplayMode):
     logger.info(
         "Retrieving SEPA accounts for %s from %s (product id=%s)",
         username,
@@ -123,6 +131,7 @@ def get_fints_client(blz, username, password, endpoint, product_id, tan_display:
         server=endpoint,
         product_id=product_id,
     )
+    fints.tan_display = tan_display
     with lock:
         with fints:
             # Bootstrap the client to set up TAN mechanisms
@@ -131,25 +140,25 @@ def get_fints_client(blz, username, password, endpoint, product_id, tan_display:
             # Handle potential TAN requirement for dialog initialization
             # fints never clears init_tan_response itself, so handle it once and reset it
             if isinstance(fints.init_tan_response, NeedTANResponse):
-                handle_tan_response(fints, fints.init_tan_response, tan_display)
+                handle_tan_response(fints, fints.init_tan_response)
                 fints.init_tan_response = None
 
             # Get SEPA accounts and handle potential TAN requirement
             sepa_accounts = fints.get_sepa_accounts()
             if isinstance(sepa_accounts, NeedTANResponse):
-                sepa_accounts = handle_tan_response(fints, sepa_accounts, tan_display)
+                sepa_accounts = handle_tan_response(fints, sepa_accounts)
 
     return fints, sepa_accounts
 
 
-def process_fints_account(account, earliest, latest, product_id, tan_display: TanDisplayMode = "auto") -> list:
+def process_fints_account(account, earliest, latest, product_id, *, tan_display: TanDisplayMode) -> list:
     fints, sepa_accounts = get_fints_client(
         account.fints_blz,
         account.fints_username,
         account.fints_password,
         account.fints_endpoint,
         product_id,
-        tan_display,
+        tan_display=tan_display,
     )
     accounts = [acc for acc in sepa_accounts if acc.iban == account.iban]
     if not accounts:
@@ -158,10 +167,8 @@ def process_fints_account(account, earliest, latest, product_id, tan_display: Ta
     sepa_account = accounts[0]
 
     if account.account_type == AccountType.HOLDING:
-        transactions = retrieve_holdings(sepa_account, fints, tan_display=tan_display)
+        transactions = retrieve_holdings(sepa_account, fints)
     else:
-        transactions = retrieve_transactions(
-            sepa_account, fints, start_date=earliest, end_date=latest, tan_display=tan_display
-        )
+        transactions = retrieve_transactions(sepa_account, fints, start_date=earliest, end_date=latest)
 
     return transactions

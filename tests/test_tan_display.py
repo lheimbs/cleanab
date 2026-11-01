@@ -23,6 +23,8 @@ def png_bytes(size=(8, 8), color=(0, 0, 0), mode="RGB", fmt="PNG"):
         ({"TERM": "xterm-ghostty"}, "kitty"),
         ({"TERM_PROGRAM": "iTerm.app"}, "iterm"),
         ({"TERM_PROGRAM": "WezTerm"}, "iterm"),
+        ({"TERM_PROGRAM": "mintty"}, "iterm"),
+        ({"TERM": "xterm-256color", "KONSOLE_VERSION": "240202"}, "kitty"),
         ({"TERM": "xterm-kitty", "TMUX": "/tmp/tmux"}, "blocks"),
         ({"TERM": "screen-256color"}, "blocks"),
         ({"SSH_CONNECTION": "a b c d", "DISPLAY": ":0"}, "blocks"),
@@ -46,10 +48,24 @@ def test_modes_match_literal():
         ({"CLEANAB_TAN_DISPLAY": "iterm"}, "iterm"),
         ({"CLEANAB_TAN_DISPLAY": " Blocks "}, "blocks"),
         ({"CLEANAB_TAN_DISPLAY": "sixel"}, "window"),
+        ({"CLEANAB_TAN_DISPLAY": "auto", "TERM": "xterm-kitty"}, "kitty"),
     ],
 )
 def test_resolve_mode(env, expected):
     assert tan_display.resolve_mode("window", env) == expected
+
+
+def test_resolve_mode_never_returns_auto():
+    assert tan_display.resolve_mode("auto", {"TERM_PROGRAM": "WezTerm"}) == "iterm"
+    assert tan_display.resolve_mode("auto", {}) == "blocks"
+
+
+@pytest.mark.parametrize(("env", "hint"), [({"DISPLAY": ":0"}, True), ({"WAYLAND_DISPLAY": "w"}, True), ({}, False)])
+def test_resolve_mode_hints_window_on_desktop(env, hint, monkeypatch):
+    messages = []
+    monkeypatch.setattr(tan_display.logger, "info", lambda msg, *a: messages.append(msg))
+    assert tan_display.resolve_mode("auto", env) == "blocks"
+    assert any("tan_display: window" in m for m in messages) == hint
 
 
 def test_kitty_sequence_chunks_and_flags():
@@ -76,7 +92,7 @@ def test_block_art_pairs_rows_and_scales():
     image.putpixel((0, 0), (0, 0, 0))
     art = tan_display.block_art(image, columns=40).splitlines()
     assert len(art) == 2  # 4 pixel rows -> 2 text rows
-    assert "\x1b[38;2;0;0;0m\x1b[48;2;255;255;255m▀" in art[0]
+    assert art[0].startswith("\x1b[38;2;0;0;0m\x1b[48;2;255;255;255m▀\x1b[38;2;255;255;255m▀▀▀")
     scaled = tan_display.block_art(Image.new("RGB", (100, 100)), columns=20).splitlines()
     assert len(scaled) == 10
 
@@ -103,6 +119,11 @@ def test_block_art_keeps_qr_modules_crisp():
     art = tan_display.block_art(image, columns=40)
     colors = set(art.replace("\x1b[0m", "").replace("▀", "").replace("\n", "").split("\x1b["))
     assert colors <= {"", "38;2;0;0;0m", "38;2;255;255;255m", "48;2;0;0;0m", "48;2;255;255;255m"}
+
+
+def test_block_art_only_emits_color_changes():
+    art = tan_display.block_art(Image.new("RGB", (50, 2), "white"), columns=50)
+    assert art == "\x1b[38;2;255;255;255m\x1b[48;2;255;255;255m" + "▀" * 50 + "\x1b[0m\n"
 
 
 def test_block_art_transparent_background_is_white():
@@ -136,6 +157,22 @@ def test_show_image_reencodes_other_formats(mode):
     assert Image.open(io.BytesIO(base64.b64decode(payload))).format == "PNG"
 
 
+class BrokenOut(io.StringIO):
+    def write(self, text):
+        if text.startswith("\x1b_G") or text.startswith("\x1b]1337"):
+            super().write(text[:10])
+            raise OSError("broken pipe")
+        return super().write(text)
+
+
+@pytest.mark.parametrize(("mode", "terminator"), [("kitty", "\x1b\\"), ("iterm", "\x07")])
+def test_show_image_terminates_escape_after_failed_write(mode, terminator):
+    out = BrokenOut()
+    with pytest.raises(OSError):
+        tan_display.show_image(png_bytes(), mode=mode, out=out)
+    assert out.getvalue().endswith(terminator + "\n")
+
+
 def test_unknown_mode_rejected():
     with pytest.raises(ValueError, match="Unknown TAN display mode"):
         tan_display.show_image(png_bytes(), mode="sixel", out=io.StringIO())
@@ -151,8 +188,8 @@ def test_handle_tan_response_shows_matrix_image(monkeypatch):
     shown = []
     monkeypatch.setattr(fints_module, "show_image", lambda data, mode: shown.append((data, mode)))
     monkeypatch.setattr("builtins.input", lambda _: "123456")
-    client = SimpleNamespace(send_tan=lambda r, tan: ["tx"])
-    assert fints_module.handle_tan_response(client, matrix_response(), "kitty") == ["tx"]
+    client = SimpleNamespace(send_tan=lambda r, tan: ["tx"], tan_display="kitty")
+    assert fints_module.handle_tan_response(client, matrix_response()) == ["tx"]
     assert shown == [(b"PNGDATA", "kitty")]
 
 
@@ -165,6 +202,19 @@ def test_handle_tan_response_survives_display_failure(monkeypatch):
 
     monkeypatch.setattr(fints_module, "show_image", broken)
     monkeypatch.setattr("builtins.input", lambda _: "123456")
-    client = SimpleNamespace(send_tan=lambda r, tan: ["tx"])
-    assert fints_module.handle_tan_response(client, matrix_response(), "kitty") == ["tx"]
+    client = SimpleNamespace(send_tan=lambda r, tan: ["tx"], tan_display="kitty")
+    assert fints_module.handle_tan_response(client, matrix_response()) == ["tx"]
     assert attempts == ["kitty", "blocks"]
+
+
+def test_show_tan_image_resolves_auto_before_falling_back(monkeypatch):
+    attempts = []
+
+    def broken(data, mode):
+        attempts.append(mode)
+        raise OSError("cannot identify image file")
+
+    monkeypatch.setattr(fints_module, "show_image", broken)
+    monkeypatch.setattr(fints_module, "detect_mode", lambda: "blocks")
+    fints_module.show_tan_image(b"junk", "auto")
+    assert attempts == ["blocks"]
