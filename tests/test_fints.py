@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 from fints.client import NeedTANResponse
+from fints.exceptions import FinTSConnectionError
 
 from cleanab import fints as fints_module
 from cleanab.models.enums import AccountType
@@ -62,6 +63,15 @@ def test_bootstrap_asks_when_multiple_mechanisms(monkeypatch):
     assert client._mechanism == "921"
 
 
+def test_bootstrap_asks_again_for_invalid_choice(monkeypatch):
+    client = FakeClient(mechanism=None)
+    client.mechanisms["921"] = SimpleNamespace(security_function="921", name="Other")
+    answers = iter(["a", "5", "1"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    fints_module.bootstrap_fints(client)
+    assert client._mechanism == "921"
+
+
 def tan_response():
     # Bypass __init__, which needs a real bank segment to parse the challenge from
     response = NeedTANResponse.__new__(NeedTANResponse)
@@ -94,6 +104,21 @@ def test_handle_tan_response_client_error(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: "1")
     with pytest.raises(fints_module.TanFailed, match="bad"):
         fints_module.handle_tan_response(SimpleNamespace(send_tan=fail), tan_response())
+
+
+def test_handle_tan_response_wraps_error_once(monkeypatch):
+    answers = iter([tan_response(), tan_response()])
+
+    def send_tan(response, tan):
+        answer = next(answers, None)
+        if answer is None:
+            raise fints_module.FinTSClientError("bad")
+        return answer
+
+    monkeypatch.setattr("builtins.input", lambda _: "1")
+    with pytest.raises(fints_module.TanFailed) as raised:
+        fints_module.handle_tan_response(SimpleNamespace(send_tan=send_tan), tan_response())
+    assert str(raised.value) == "Failed to send TAN: bad"
 
 
 def test_process_fints_account_unknown_iban(account, monkeypatch):
@@ -157,6 +182,55 @@ def test_get_fints_client_does_not_retry_failed_login(monkeypatch):
         fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
     with pytest.raises(fints_module.LoginSkipped, match="already failed.*rejected"):
         fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert len(connects) == 1
+
+
+def test_get_fints_client_retries_non_auth_errors(monkeypatch):
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append(key)
+        if len(connects) == 1:
+            raise FinTSConnectionError("timeout")
+        return "client", []
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    with pytest.raises(FinTSConnectionError):
+        fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks") == ("client", [])
+
+
+def test_get_fints_client_does_not_keep_the_exception(monkeypatch):
+    def fake_connect(*key, tan_display):
+        raise fints_module.TanFailed("rejected")
+
+    clients = {}
+    monkeypatch.setattr(fints_module, "_clients", clients)
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    with pytest.raises(fints_module.TanFailed):
+        fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert list(clients.values()) == ["rejected"]
+
+
+def test_rejected_tan_after_login_skips_other_accounts(account, monkeypatch):
+    sepa = SimpleNamespace(iban=account.iban)
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append(key)
+        return "client", [sepa]
+
+    def rejected(*args, **kwargs):
+        raise fints_module.TanFailed("rejected")
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    monkeypatch.setattr(fints_module, "retrieve_transactions", rejected)
+    with pytest.raises(fints_module.TanFailed):
+        fints_module.process_fints_account(account, "a", "b", "pid", tan_display="blocks")
+    with pytest.raises(fints_module.LoginSkipped, match="rejected"):
+        fints_module.process_fints_account(account, "a", "b", "pid", tan_display="blocks")
     assert len(connects) == 1
 
 

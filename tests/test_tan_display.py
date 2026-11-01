@@ -64,13 +64,14 @@ def test_modes_match_literal():
         ({"CLEANAB_TAN_DISPLAY": "auto", "TERM": "xterm-kitty"}, "kitty"),
     ],
 )
-def test_resolve_mode(env, expected):
-    assert tan_display.resolve_mode("window", env) == expected
+def test_configured_mode(env, expected):
+    mode = tan_display.configured_mode("window", env)
+    assert (mode if mode != "auto" else tan_display._auto_mode(env)) == expected
 
 
-def test_resolve_mode_never_returns_auto():
-    assert tan_display.resolve_mode("auto", {"TERM_PROGRAM": "WezTerm"}) == "iterm"
-    assert tan_display.resolve_mode("auto", {}) == "blocks"
+def test_auto_mode_never_returns_auto():
+    assert tan_display._auto_mode({"TERM_PROGRAM": "WezTerm"}) == "iterm"
+    assert tan_display._auto_mode({}) == "blocks"
 
 
 @pytest.mark.parametrize(
@@ -84,14 +85,14 @@ def test_resolve_mode_never_returns_auto():
         ({"KONSOLE_VERSION": "240202", "TERM_PROGRAM": "WezTerm"}, False, "iterm"),
     ],
 )
-def test_resolve_mode_confirms_kitty_with_the_terminal(env, supported, expected, monkeypatch):
+def test_auto_mode_confirms_kitty_with_the_terminal(env, supported, expected, monkeypatch):
     monkeypatch.setattr(tan_display, "kitty_graphics_supported", lambda: supported)
-    assert tan_display.resolve_mode("auto", env) == expected
+    assert tan_display._auto_mode(env) == expected
 
 
-def test_resolve_mode_does_not_probe_explicit_kitty(monkeypatch):
+def test_resolve_once_does_not_probe_explicit_kitty(monkeypatch):
     monkeypatch.setattr(tan_display, "kitty_graphics_supported", lambda: pytest.fail("probed"))
-    assert tan_display.resolve_mode("kitty", {}) == "kitty"
+    assert tan_display.resolve_once("kitty") == "kitty"
 
 
 def test_kitty_probe_needs_a_terminal(monkeypatch):
@@ -101,10 +102,10 @@ def test_kitty_probe_needs_a_terminal(monkeypatch):
 
 
 @pytest.mark.parametrize(("env", "hint"), [({"DISPLAY": ":0"}, True), ({"WAYLAND_DISPLAY": "w"}, True), ({}, False)])
-def test_resolve_mode_hints_window_on_desktop(env, hint, monkeypatch):
+def test_auto_mode_hints_window_on_desktop(env, hint, monkeypatch):
     messages = []
     monkeypatch.setattr(tan_display.logger, "info", lambda msg, *a: messages.append(msg))
-    assert tan_display.resolve_mode("auto", env) == "blocks"
+    assert tan_display._auto_mode(env) == "blocks"
     assert any("tan_display: window" in m for m in messages) == hint
 
 
@@ -330,6 +331,13 @@ def test_read_line_strips_terminal_replies(reply, monkeypatch):
     assert tan_display.read_line("TAN: ") == "123456"
 
 
+@pytest.mark.parametrize("garbled", ["\x1b_Gi=31;OK123456", "\x1b[?62;123456", "\x1b123456"])
+def test_read_line_asks_again_after_cut_reply(garbled, monkeypatch):
+    lines = iter([garbled, "123456"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(lines))
+    assert tan_display.read_line("TAN: ") == "123456"
+
+
 def test_show_window_needs_a_display(monkeypatch):
     monkeypatch.setattr(tan_display.sys, "platform", "linux")
     monkeypatch.setattr(tan_display.ImageShow, "show", lambda image: pytest.fail("viewer started"))
@@ -366,7 +374,7 @@ def test_unknown_or_unresolved_mode_rejected(mode):
 
 def matrix_response():
     return SimpleNamespace(
-        challenge="scan", challenge_hhduc=None, challenge_matrix=("image/png", b"PNGDATA"), challenge_html=""
+        challenge="scan", challenge_hhduc=None, challenge_matrix=("image/png", png_bytes()), challenge_html=""
     )
 
 
@@ -377,17 +385,17 @@ def tty(monkeypatch):
 
 def test_handle_tan_response_shows_matrix_image(monkeypatch, tty):
     shown = []
-    monkeypatch.setattr(fints_module, "show_image", lambda data, mode: shown.append((data, mode)))
+    monkeypatch.setattr(fints_module, "show_image", lambda data, mode, **kw: shown.append((data, mode)))
     monkeypatch.setattr("builtins.input", lambda _: "123456")
     client = SimpleNamespace(send_tan=lambda r, tan: ["tx"], tan_display="kitty")
     assert fints_module.handle_tan_response(client, matrix_response()) == ["tx"]
-    assert shown == [(b"PNGDATA", "kitty")]
+    assert shown == [(png_bytes(), "kitty")]
 
 
 def test_handle_tan_response_survives_display_failure(monkeypatch, tty):
     attempts = []
 
-    def broken(data, mode):
+    def broken(data, mode, **kw):
         attempts.append(mode)
         raise OSError("cannot write mode CMYK as PNG")
 
@@ -401,12 +409,12 @@ def test_handle_tan_response_survives_display_failure(monkeypatch, tty):
 def test_show_tan_image_tries_blocks_once(monkeypatch, tty):
     attempts = []
 
-    def broken(data, mode):
+    def broken(data, mode, **kw):
         attempts.append(mode)
         raise OSError("broken pipe")
 
     monkeypatch.setattr(fints_module, "show_image", broken)
-    fints_module.show_tan_image(b"png", "blocks")
+    fints_module.show_tan_image(png_bytes(), "blocks")
     assert attempts == ["blocks"]
 
 
@@ -414,28 +422,62 @@ def test_show_tan_image_does_not_retry_decode_errors(monkeypatch, tty):
     errors = []
     monkeypatch.setattr(fints_module.logger, "exception", lambda *a: errors.append("traceback"))
     monkeypatch.setattr(fints_module.logger, "error", lambda *a: errors.append("error"))
+    monkeypatch.setattr(fints_module, "show_image", lambda *a, **kw: pytest.fail("shown"))
     fints_module.show_tan_image(b"junk", "kitty")
     assert errors == ["error"]
+
+
+def test_show_tan_image_expected_failure_has_no_traceback(monkeypatch, tty):
+    logged = []
+
+    def broken(data, mode, **kw):
+        raise OSError("no graphical display")
+
+    monkeypatch.setattr(fints_module, "show_image", broken)
+    monkeypatch.setattr(fints_module.logger, "exception", lambda *a: logged.append("traceback"))
+    monkeypatch.setattr(fints_module.logger, "warning", lambda *a: logged.append("warning"))
+    monkeypatch.setattr(tan_display.sys.stdout, "write", lambda text: len(text), raising=False)
+    fints_module.show_tan_image(png_bytes(), "window")
+    assert logged == ["warning", "warning"]
+
+
+def test_show_tan_image_decodes_once(monkeypatch, tty):
+    decodes = []
+    real_decode = fints_module.decode
+    monkeypatch.setattr(fints_module, "decode", lambda data: decodes.append(1) or real_decode(data))
+    monkeypatch.setattr(tan_display, "decode", lambda data: pytest.fail("decoded again"))
+    attempts = []
+
+    def flaky(data, mode, **kw):
+        attempts.append(mode)
+        if mode == "kitty":
+            raise OSError("broken")
+        return tan_display.show_image(data, mode, out=io.StringIO(), **kw)
+
+    monkeypatch.setattr(fints_module, "show_image", flaky)
+    fints_module.show_tan_image(png_bytes(), "kitty")
+    assert attempts == ["kitty", "blocks"]
+    assert decodes == [1]
 
 
 def test_show_tan_image_resolves_auto(monkeypatch, tty):
     shown = []
     monkeypatch.setattr(fints_module, "resolve_once", lambda mode: "iterm")
-    monkeypatch.setattr(fints_module, "show_image", lambda data, mode: shown.append(mode))
-    fints_module.show_tan_image(b"png", "auto")
+    monkeypatch.setattr(fints_module, "show_image", lambda data, mode, **kw: shown.append(mode))
+    fints_module.show_tan_image(png_bytes(), "auto")
     assert shown == ["iterm"]
 
 
 def test_show_tan_image_window_without_tty_does_not_fall_back(monkeypatch):
     attempts = []
 
-    def broken(data, mode):
+    def broken(data, mode, **kw):
         attempts.append(mode)
         raise OSError("no graphical display")
 
     monkeypatch.setattr(fints_module.sys.stdout, "isatty", lambda: False, raising=False)
     monkeypatch.setattr(fints_module, "show_image", broken)
-    fints_module.show_tan_image(b"png", "window")
+    fints_module.show_tan_image(png_bytes(), "window")
     assert attempts == ["window"]
 
 
@@ -443,6 +485,6 @@ def test_show_tan_image_window_without_tty_does_not_fall_back(monkeypatch):
 def test_show_tan_image_skips_terminal_modes_without_tty(mode, shown, monkeypatch):
     calls = []
     monkeypatch.setattr(fints_module.sys.stdout, "isatty", lambda: False, raising=False)
-    monkeypatch.setattr(fints_module, "show_image", lambda data, m: calls.append(m))
-    fints_module.show_tan_image(b"png", mode)
+    monkeypatch.setattr(fints_module, "show_image", lambda data, m, **kw: calls.append(m))
+    fints_module.show_tan_image(png_bytes(), mode)
     assert bool(calls) == shown

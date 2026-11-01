@@ -43,9 +43,9 @@ _TERMINATORS = {"kitty": "\x1b\\\n", "iterm": "\x07\n"}
 _KITTY_QUERY = b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c"
 _KITTY_OK = b"\x1b_Gi=31;OK"
 _DA1_REPLY = re.compile(rb"\x1b\[\?[\d;]*c")
-# Terminal replies that can end up in a typed line: APC/OSC/DCS strings (kitty graphics replies) and CSI replies
-# such as DA1. ESC itself is never part of a TAN or a menu choice.
-_TERMINAL_REPLY = re.compile(r"\x1b[_\]P][^\x07\x1b]*(?:\x1b\\|\x07)?|\x1b\[[\d;?]*[A-Za-z]|\x1b")
+# Terminal replies that can end up in a typed line: terminated APC/OSC/DCS strings (kitty graphics replies) and CSI
+# replies such as DA1. An unterminated string has no reliable end, so read_line asks again instead of guessing.
+_TERMINAL_REPLY = re.compile(r"\x1b[_\]P][^\x07\x1b]*(?:\x1b\\|\x07)|\x1b\[[\d;?]*[A-Za-z]")
 _PROBE_TIMEOUT = 2.0
 # Give whatever application PIL uses to display the image time to start.
 _WINDOW_DELAY = 5
@@ -65,13 +65,6 @@ def configured_mode(configured: TanDisplayMode = "auto", env: dict[str, str] | N
             "Ignoring %s=%r, expected one of %s; using %r", ENV_VAR, env[ENV_VAR], ", ".join(MODES), configured
         )
     return configured
-
-
-def resolve_mode(configured: TanDisplayMode = "auto", env: dict[str, str] | None = None) -> TanDisplayMode:
-    """Turn the configured mode into a concrete one (never ``auto``)."""
-    env = os.environ if env is None else env
-    mode = configured_mode(configured, env)
-    return mode if mode != "auto" else _auto_mode(env)
 
 
 @functools.cache
@@ -410,14 +403,20 @@ def show_window(image: Image.Image, env: dict[str, str] | None = None) -> None:
 def read_line(prompt: str) -> str:
     """``input()`` without terminal replies: a late kitty probe or graphics reply would otherwise become the input.
 
-    Replies already waiting are discarded before the prompt; ones that arrive while typing are stripped.
+    Replies already waiting are discarded before the prompt; ones that arrive while typing are stripped. If what
+    is left still contains an escape character (a reply cut in half, a stray ESC key), the line can't be trusted and
+    is asked for again, rather than sending a mangled TAN to the bank.
     """
-    if sys.stdin.isatty():
-        with contextlib.suppress(Exception):
-            import termios
+    while True:
+        if sys.stdin.isatty():
+            with contextlib.suppress(Exception):
+                import termios
 
-            termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
-    return _TERMINAL_REPLY.sub("", input(prompt))
+                termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+        line = _TERMINAL_REPLY.sub("", input(prompt))
+        if "\x1b" not in line:
+            return line
+        logger.error("The input was mixed up with a reply from the terminal, please enter it again")
 
 
 def decode(data: bytes) -> Image.Image:
@@ -429,16 +428,17 @@ def decode(data: bytes) -> Image.Image:
     return image
 
 
-def show_image(data: bytes, mode: TanDisplayMode, out=None) -> TanDisplayMode:
-    """Display the image in a concrete mode (see ``resolve_mode``) and return it.
+def show_image(data: bytes, mode: TanDisplayMode, out=None, *, image: Image.Image | None = None) -> TanDisplayMode:
+    """Display the image in a concrete mode (see ``resolve_once``) and return it.
 
+    ``image`` is ``data`` decoded already, so falling back to another mode needn't decode it again.
     Raises ``ImageDecodeError`` if the image itself is broken, anything else is an output problem.
     """
     if mode not in MODES or mode == "auto":
         raise ValueError(f"Unknown TAN display mode {mode!r}, expected one of {', '.join(MODES[1:])}")
     out = out or sys.stdout
 
-    image = decode(data)
+    image = decode(data) if image is None else image
     if mode == "window":
         show_window(image)
         return mode
