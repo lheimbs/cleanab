@@ -104,18 +104,18 @@ def test_process_fints_account_fetches_transactions(account, monkeypatch):
     monkeypatch.setattr(fints_module, "get_fints_client", lambda *a: ("client", [sepa]))
     seen = {}
 
-    def fake_retrieve(sepa_account, client, *, start_date, end_date):
-        seen.update(sepa=sepa_account, client=client, start=start_date, end=end_date)
+    def fake_retrieve(sepa_account, client, *, start_date, end_date, tan_display):
+        seen.update(sepa=sepa_account, client=client, start=start_date, end=end_date, tan_display=tan_display)
         return ["tx"]
 
     monkeypatch.setattr(fints_module, "retrieve_transactions", fake_retrieve)
-    assert fints_module.process_fints_account(account, "start", "end", "pid") == ["tx"]
-    assert seen == {"sepa": sepa, "client": "client", "start": "start", "end": "end"}
+    assert fints_module.process_fints_account(account, "start", "end", "pid", "blocks") == ["tx"]
+    assert seen == {"sepa": sepa, "client": "client", "start": "start", "end": "end", "tan_display": "blocks"}
 
 
 def test_process_fints_account_holdings(account, monkeypatch):
     account.account_type = AccountType.HOLDING
     sepa = SimpleNamespace(iban=account.iban)
     monkeypatch.setattr(fints_module, "get_fints_client", lambda *a: ("client", [sepa]))
-    monkeypatch.setattr(fints_module, "retrieve_holdings", lambda s, c: ["h"])
+    monkeypatch.setattr(fints_module, "retrieve_holdings", lambda s, c, **kw: ["h"])
     assert fints_module.process_fints_account(account, "a", "b", None) == ["h"]

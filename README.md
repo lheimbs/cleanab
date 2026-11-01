@@ -52,13 +52,13 @@ viewer, so it also works over SSH. It picks the best method for your terminal:
 
 | `cleanab.tan_display` | Used when | Notes |
 | --- | --- | --- |
-| `kitty` | kitty, Ghostty, WezTerm | [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/), sharpest |
-| `iterm` | iTerm2 | inline images |
-| `blocks` | everything else, tmux/screen, SSH | truecolor half-blocks; needs a terminal at least ~60 columns wide |
+| `kitty` | kitty, Ghostty | [kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/), sharpest |
+| `iterm` | iTerm2, WezTerm | inline images |
+| `blocks` | everything else, tmux/screen, SSH | truecolor half-blocks, shrunk to fit the terminal; give it ~60 columns and ~30 rows so QR codes stay scannable |
 | `window` | only if you set it | opens the system image viewer on the machine cleanab runs on |
 | `auto` (default) | | choose from the environment |
 
-Force a mode with `cleanab: {tan_display: blocks}` in the config or `CLEANAB_TAN_DISPLAY=blocks`. Inside tmux the
+Force a mode with `cleanab: {tan_display: blocks}` in the config or `CLEANAB_TAN_DISPLAY=blocks` (an invalid value is ignored with a warning). If a mode fails, cleanab falls back to `blocks` and still asks for the TAN. Inside tmux the
 graphics protocols need `allow-passthrough`, so `auto` uses `blocks` there. Zoom out the terminal font if a QR code is too
 large to fit on screen, or scan it from a distance.
 

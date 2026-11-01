@@ -9,7 +9,7 @@ from .cleaner import FieldCleaner
 from .fints import process_fints_account
 from .models import AccountConfig
 from .models.enums import AccountType
-from .tan_display import set_mode
+from .tan_display import resolve_mode
 from .transactions import process_transaction
 
 
@@ -30,7 +30,7 @@ class Cleanab:
 
     def setup(self):
         self.today = date.today()
-        set_mode(self.config.cleanab.tan_display)
+        self.tan_display = resolve_mode(self.config.cleanab.tan_display)
         self.setup_app_connections()
         for app in self.config.apps.keys():
             logger.info(f"Loaded App {app}")
@@ -58,6 +58,7 @@ class Cleanab:
                 earliest=self.earliest,
                 latest=self.today,
                 product_id=self.config.cleanab.fints_product_id,
+                tan_display=self.tan_display,
             )
             account.write_account_cache(raw_transactions)
         return raw_transactions

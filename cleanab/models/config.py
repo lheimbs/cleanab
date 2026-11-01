@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated
 
 from logzero import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -8,6 +8,7 @@ from pydantic.main import create_model
 from cleanab.apps.base import BaseApp, _AppConfigValidator, load_app
 
 from ..constants import FIELDS_TO_CLEAN_UP
+from ..tan_display import TanDisplayMode
 from .account_config import AccountConfig
 from .cleaner import FinalizerDefinition, ReplacementDefinition
 
@@ -22,7 +23,7 @@ class CleanabConfig(BaseModel):
     debug: bool = False
     fints_product_id: str | None = None
     # How to show photoTAN/QR images: auto, kitty, iterm, blocks (works over SSH) or window
-    tan_display: Literal["auto", "kitty", "iterm", "blocks", "window"] = "auto"
+    tan_display: TanDisplayMode = "auto"
 
 
 NestedReplacementEntry = list[ReplacementDefinition | str]

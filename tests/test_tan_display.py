@@ -9,9 +9,9 @@ from cleanab import fints as fints_module
 from cleanab import tan_display
 
 
-def png_bytes(size=(8, 8), color=(0, 0, 0)):
+def png_bytes(size=(8, 8), color=(0, 0, 0), mode="RGB", fmt="PNG"):
     buffer = io.BytesIO()
-    Image.new("RGB", size, color).save(buffer, format="PNG")
+    Image.new(mode, size, color).save(buffer, format=fmt)
     return buffer.getvalue()
 
 
@@ -22,6 +22,7 @@ def png_bytes(size=(8, 8), color=(0, 0, 0)):
         ({"TERM": "xterm-kitty"}, "kitty"),
         ({"TERM": "xterm-ghostty"}, "kitty"),
         ({"TERM_PROGRAM": "iTerm.app"}, "iterm"),
+        ({"TERM_PROGRAM": "WezTerm"}, "iterm"),
         ({"TERM": "xterm-kitty", "TMUX": "/tmp/tmux"}, "blocks"),
         ({"TERM": "screen-256color"}, "blocks"),
         ({"SSH_CONNECTION": "a b c d", "DISPLAY": ":0"}, "blocks"),
@@ -32,6 +33,23 @@ def png_bytes(size=(8, 8), color=(0, 0, 0)):
 )
 def test_detect_mode(env, expected):
     assert tan_display.detect_mode(env) == expected
+
+
+def test_modes_match_literal():
+    assert tan_display.MODES == ("auto", "kitty", "iterm", "blocks", "window")
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({}, "window"),
+        ({"CLEANAB_TAN_DISPLAY": "iterm"}, "iterm"),
+        ({"CLEANAB_TAN_DISPLAY": " Blocks "}, "blocks"),
+        ({"CLEANAB_TAN_DISPLAY": "sixel"}, "window"),
+    ],
+)
+def test_resolve_mode(env, expected):
+    assert tan_display.resolve_mode("window", env) == expected
 
 
 def test_kitty_sequence_chunks_and_flags():
@@ -63,6 +81,35 @@ def test_block_art_pairs_rows_and_scales():
     assert len(scaled) == 10
 
 
+def test_block_art_fits_terminal_height():
+    # 400x400 on a 100x30 terminal: width alone would allow 99 columns / 50 rows
+    art = tan_display.block_art(Image.new("RGB", (400, 400)), columns=99, rows=28).splitlines()
+    assert len(art) <= 28
+    assert art[0].count("▀") <= 56
+
+
+def test_block_art_narrow_pane_does_not_overflow():
+    art = tan_display.block_art(Image.new("RGB", (100, 100)), columns=10).splitlines()
+    assert all(line.count("▀") <= 10 for line in art)
+
+
+def test_block_art_keeps_qr_modules_crisp():
+    # 3-pixel black/white stripes shrunk by a non-integer factor must not produce gray
+    image = Image.new("RGB", (99, 4), "white")
+    for x in range(99):
+        if (x // 3) % 2 == 0:
+            for y in range(4):
+                image.putpixel((x, y), (0, 0, 0))
+    art = tan_display.block_art(image, columns=40)
+    colors = set(art.replace("\x1b[0m", "").replace("▀", "").replace("\n", "").split("\x1b["))
+    assert colors <= {"", "38;2;0;0;0m", "38;2;255;255;255m", "48;2;0;0;0m", "48;2;255;255;255m"}
+
+
+def test_block_art_transparent_background_is_white():
+    art = tan_display.block_art(Image.new("RGBA", (2, 2), (0, 0, 0, 0)), columns=10)
+    assert "\x1b[38;2;255;255;255m\x1b[48;2;255;255;255m▀" in art
+
+
 def test_show_image_writes_selected_mode():
     out = io.StringIO()
     assert tan_display.show_image(png_bytes(), mode="kitty", out=out) == "kitty"
@@ -72,24 +119,52 @@ def test_show_image_writes_selected_mode():
     assert "▀" in out.getvalue()
 
 
+def test_show_image_passes_png_through_unchanged():
+    data = png_bytes()
+    out = io.StringIO()
+    tan_display.show_image(data, mode="iterm", out=out)
+    assert base64.b64encode(data).decode() in out.getvalue()
+
+
+@pytest.mark.parametrize("mode", ["CMYK", "RGBA"])
+def test_show_image_reencodes_other_formats(mode):
+    color = (0, 0, 0, 0) if mode == "CMYK" else (0, 0, 0, 255)
+    data = png_bytes(mode=mode, color=color, fmt="TIFF")
+    out = io.StringIO()
+    tan_display.show_image(data, mode="iterm", out=out)
+    payload = out.getvalue().split(":", 1)[1].rstrip("\x07\n")
+    assert Image.open(io.BytesIO(base64.b64decode(payload))).format == "PNG"
+
+
 def test_unknown_mode_rejected():
     with pytest.raises(ValueError, match="Unknown TAN display mode"):
         tan_display.show_image(png_bytes(), mode="sixel", out=io.StringIO())
 
 
-def test_environment_overrides_configured_mode(monkeypatch):
-    monkeypatch.setenv("CLEANAB_TAN_DISPLAY", "iterm")
-    out = io.StringIO()
-    assert tan_display.show_image(png_bytes(), out=out) == "iterm"
+def matrix_response():
+    return SimpleNamespace(
+        challenge="scan", challenge_hhduc=None, challenge_matrix=("image/png", b"PNGDATA"), challenge_html=""
+    )
 
 
 def test_handle_tan_response_shows_matrix_image(monkeypatch):
     shown = []
-    monkeypatch.setattr(fints_module, "show_image", lambda data: shown.append(data) or "blocks")
+    monkeypatch.setattr(fints_module, "show_image", lambda data, mode: shown.append((data, mode)))
     monkeypatch.setattr("builtins.input", lambda _: "123456")
-    response = SimpleNamespace(
-        challenge="scan", challenge_hhduc=None, challenge_matrix=("image/png", b"PNGDATA"), challenge_html=""
-    )
     client = SimpleNamespace(send_tan=lambda r, tan: ["tx"])
-    assert fints_module.handle_tan_response(client, response) == ["tx"]
-    assert shown == [b"PNGDATA"]
+    assert fints_module.handle_tan_response(client, matrix_response(), "kitty") == ["tx"]
+    assert shown == [(b"PNGDATA", "kitty")]
+
+
+def test_handle_tan_response_survives_display_failure(monkeypatch):
+    attempts = []
+
+    def broken(data, mode):
+        attempts.append(mode)
+        raise OSError("cannot write mode CMYK as PNG")
+
+    monkeypatch.setattr(fints_module, "show_image", broken)
+    monkeypatch.setattr("builtins.input", lambda _: "123456")
+    client = SimpleNamespace(send_tan=lambda r, tan: ["tx"])
+    assert fints_module.handle_tan_response(client, matrix_response(), "kitty") == ["tx"]
+    assert attempts == ["kitty", "blocks"]
