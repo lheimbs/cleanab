@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from fints.client import NeedTANResponse
 
 from cleanab import fints as fints_module
@@ -91,7 +92,8 @@ def test_handle_tan_response_client_error(monkeypatch):
         raise fints_module.FinTSClientError("bad")
 
     monkeypatch.setattr("builtins.input", lambda _: "1")
-    assert fints_module.handle_tan_response(SimpleNamespace(send_tan=fail), tan_response()) == []
+    with pytest.raises(fints_module.TanFailed, match="bad"):
+        fints_module.handle_tan_response(SimpleNamespace(send_tan=fail), tan_response())
 
 
 def test_process_fints_account_unknown_iban(account, monkeypatch):
@@ -143,6 +145,22 @@ def test_get_fints_client_cache_ignores_tan_display(monkeypatch):
 
 
 def test_get_fints_client_does_not_retry_failed_login(monkeypatch):
+    connects = []
+
+    def fake_connect(*key, tan_display):
+        connects.append(key)
+        raise fints_module.TanFailed("rejected")
+
+    monkeypatch.setattr(fints_module, "_clients", {})
+    monkeypatch.setattr(fints_module, "_connect", fake_connect)
+    with pytest.raises(fints_module.TanFailed):
+        fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    with pytest.raises(fints_module.LoginSkipped, match="already failed.*rejected"):
+        fints_module.get_fints_client("blz", "user", "pw", "url", "pid", tan_display="blocks")
+    assert len(connects) == 1
+
+
+def test_get_fints_client_login_without_accounts_is_not_a_failure(monkeypatch):
     connects = []
 
     def fake_connect(*key, tan_display):

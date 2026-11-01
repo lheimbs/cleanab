@@ -20,6 +20,9 @@ def png_bytes(size=(8, 8), color=(0, 0, 0), mode="RGB", fmt="PNG"):
 def no_terminal_probe(monkeypatch):
     """Never talk to the real terminal from tests; "can't tell" keeps the environment's guess."""
     monkeypatch.setattr(tan_display, "kitty_graphics_supported", lambda: None)
+    tan_display.resolve_once.cache_clear()
+    yield
+    tan_display.resolve_once.cache_clear()
 
 
 @pytest.mark.parametrize(
@@ -223,6 +226,60 @@ def test_module_size(module):
     assert tan_display.module_size(stripes(module)) == module
 
 
+def test_module_size_ignores_stray_pixels():
+    image = stripes(4, count=60)
+    for x, y in [(41, 2), (101, 7), (161, 12)]:  # single light pixels inside dark modules
+        image.putpixel((x, y), (255, 255, 255))
+    assert tan_display.module_size(image) == 4
+
+
+def test_blocks_use_wide_terminals(monkeypatch):
+    """No fixed column cap, so enlarging the terminal as the too-small warning says actually helps."""
+    monkeypatch.setattr(tan_display.shutil, "get_terminal_size", lambda fallback: os.terminal_size((201, 202)))
+    monkeypatch.setenv("COLORTERM", "truecolor")
+    out = io.StringIO()
+    tan_display.show_image(png_bytes(size=(400, 400), color=(255, 255, 255)), mode="blocks", out=out)
+    first_line = out.getvalue().splitlines()[0]
+    assert first_line.count("▀") == 200
+
+
+@pytest.mark.parametrize(
+    ("env", "depth"),
+    [
+        ({"COLORTERM": "truecolor", "TERM": "xterm-256color"}, "truecolor"),
+        ({"TERM": "xterm-kitty"}, "truecolor"),
+        ({"TERM": "xterm-256color"}, "256"),
+        ({"TERM": "linux"}, "16"),
+        ({}, "16"),
+    ],
+)
+def test_color_depth(env, depth):
+    assert tan_display.color_depth(env) == depth
+
+
+@pytest.mark.parametrize(
+    ("depth", "black", "white"),
+    [
+        ("truecolor", "\x1b[38;2;0;0;0m", "\x1b[48;2;255;255;255m"),
+        ("256", "\x1b[38;5;16m", "\x1b[48;5;231m"),
+        ("16", "\x1b[30m", "\x1b[107m"),
+    ],
+)
+def test_sgr_color_keeps_black_and_white_exact(depth, black, white):
+    assert tan_display.sgr_color((0, 0, 0), background=False, depth=depth) == black
+    assert tan_display.sgr_color((255, 255, 255), background=True, depth=depth) == white
+
+
+def test_ansi256_maps_colors_to_the_cube_and_grays_to_the_ramp():
+    assert tan_display._ansi256((255, 0, 0)) == 196
+    assert tan_display._ansi256((128, 128, 128)) == 244
+
+
+def test_block_art_without_truecolor_has_no_24bit_codes():
+    art = tan_display.block_art(Image.new("RGB", (4, 4), (200, 30, 30)), columns=4, depth="256")
+    assert "38;2;" not in art and "38;5;" in art
+
+
 @pytest.mark.parametrize(("scale", "warns"), [(1.0, False), (0.5, False), (0.3, True)])
 def test_warn_if_too_small(scale, warns, monkeypatch):
     messages = []
@@ -262,6 +319,43 @@ def test_show_image_terminates_escape_after_failed_write(mode, terminator):
     with pytest.raises(OSError):
         tan_display.show_image(png_bytes(), mode=mode, out=out)
     assert out.getvalue().endswith(terminator + "\n")
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["\x1b_Gi=31;OK\x1b\\\x1b[?62;c", "\x1b_Gi=1;ENOENT:no such image\x1b\\", "\x1b[?64;1;2c", "\x1b]1337;x\x07"],
+)
+def test_read_line_strips_terminal_replies(reply, monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt: "12" + reply + "3456")
+    assert tan_display.read_line("TAN: ") == "123456"
+
+
+def test_show_window_needs_a_display(monkeypatch):
+    monkeypatch.setattr(tan_display.sys, "platform", "linux")
+    monkeypatch.setattr(tan_display.ImageShow, "show", lambda image: pytest.fail("viewer started"))
+    with pytest.raises(OSError, match="no graphical display"):
+        tan_display.show_window(Image.new("RGB", (2, 2)), env={})
+
+
+def test_show_window_fails_without_viewer(monkeypatch):
+    monkeypatch.setattr(tan_display.sys, "platform", "linux")
+    monkeypatch.setattr(tan_display.ImageShow, "show", lambda image: False)
+    with pytest.raises(OSError, match="no image viewer"):
+        tan_display.show_window(Image.new("RGB", (2, 2)), env={"DISPLAY": ":0"})
+
+
+def test_configured_mode_keeps_auto():
+    assert tan_display.configured_mode("auto", {}) == "auto"
+    assert tan_display.configured_mode("auto", {"CLEANAB_TAN_DISPLAY": "Kitty"}) == "kitty"
+
+
+def test_resolve_once_probes_only_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tan_display, "_auto_mode", lambda env: calls.append(env) or "blocks")
+    assert tan_display.resolve_once("auto") == "blocks"
+    assert tan_display.resolve_once("auto") == "blocks"
+    assert tan_display.resolve_once("iterm") == "iterm"
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("mode", ["sixel", "auto"])
@@ -322,6 +416,27 @@ def test_show_tan_image_does_not_retry_decode_errors(monkeypatch, tty):
     monkeypatch.setattr(fints_module.logger, "error", lambda *a: errors.append("error"))
     fints_module.show_tan_image(b"junk", "kitty")
     assert errors == ["error"]
+
+
+def test_show_tan_image_resolves_auto(monkeypatch, tty):
+    shown = []
+    monkeypatch.setattr(fints_module, "resolve_once", lambda mode: "iterm")
+    monkeypatch.setattr(fints_module, "show_image", lambda data, mode: shown.append(mode))
+    fints_module.show_tan_image(b"png", "auto")
+    assert shown == ["iterm"]
+
+
+def test_show_tan_image_window_without_tty_does_not_fall_back(monkeypatch):
+    attempts = []
+
+    def broken(data, mode):
+        attempts.append(mode)
+        raise OSError("no graphical display")
+
+    monkeypatch.setattr(fints_module.sys.stdout, "isatty", lambda: False, raising=False)
+    monkeypatch.setattr(fints_module, "show_image", broken)
+    fints_module.show_tan_image(b"png", "window")
+    assert attempts == ["window"]
 
 
 @pytest.mark.parametrize(("mode", "shown"), [("blocks", False), ("window", True)])

@@ -8,16 +8,28 @@ from fints.hhd.flicker import terminal_flicker_unix
 from logzero import logger
 
 from .models.enums import AccountType
-from .tan_display import ImageDecodeError, TanDisplayMode, show_image
+from .tan_display import ImageDecodeError, TanDisplayMode, read_line, resolve_once, show_image
 
 lock = Lock()
-# Logged-in clients per bank login, so each login (and its TAN) happens once per run. Bounded by the configured
-# bank logins; failed logins are not stored.
-_clients: dict[tuple, tuple] = {}
+# The outcome of each bank login, so each login (and its TAN) happens once per run: the logged-in client and its
+# SEPA accounts, or the exception it failed with. Failures are kept on purpose, see get_fints_client.
+# Bounded by the configured bank logins.
+_clients: dict[tuple, tuple | Exception] = {}
+
+
+class TanFailed(FinTSClientError):
+    """The bank rejected the TAN or the TAN dialog failed."""
+
+
+class LoginSkipped(RuntimeError):
+    """The bank login already failed earlier in this run, so it isn't attempted again."""
 
 
 class CleanabFinTSClient(FinTS3PinTanClient):
-    """A FinTS client that knows how to show TAN images, so the mode needn't be threaded through every call."""
+    """A FinTS client that knows how to show TAN images, so the mode needn't be threaded through every call.
+
+    ``tan_display`` may still be ``auto``; it is resolved when the first TAN image is shown.
+    """
 
     def __init__(self, *args, tan_display: TanDisplayMode, **kwargs):
         super().__init__(*args, **kwargs)
@@ -34,7 +46,7 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
             logger.info("Multiple tan mechanisms available. Which one do you prefer?")
             for i, m in enumerate(mechanisms):
                 logger.info(f"{i}: Function {m[1].security_function}: {m[1].name}")
-            choice = input("Choice: ").strip()
+            choice = read_line("Choice: ").strip()
             fints.set_tan_mechanism(mechanisms[int(choice)][0])
 
     if fints.is_tan_media_required() and not fints.selected_tan_medium:
@@ -52,7 +64,7 @@ def bootstrap_fints(fints: FinTS3PinTanClient):
                     f"{i}: Medium {tan_medium.tan_medium_name}: Phone no. {tan_medium.mobile_number_masked}, "
                     f"Last used {tan_medium.last_use}"
                 )
-            choice = input("Choice: ").strip()
+            choice = read_line("Choice: ").strip()
             fints.set_tan_medium(tan_media[1][int(choice)])
 
 
@@ -61,13 +73,17 @@ def show_tan_image(data: bytes, mode: TanDisplayMode) -> None:
 
     Never let a display problem keep the user from entering the TAN.
     """
-    if mode != "window" and not sys.stdout.isatty():
+    tty = sys.stdout.isatty()
+    if mode != "window" and not tty:
         logger.warning(
             "Not drawing the TAN image because stdout is not a terminal; "
             "run cleanab interactively or set cleanab.tan_display: window"
         )
         return
-    for attempt in dict.fromkeys((mode, "blocks")):
+    mode = resolve_once(mode)
+    # Without a terminal, a failed window must not fall back to drawing escape codes into a log file.
+    attempts = dict.fromkeys((mode, "blocks")) if tty else (mode,)
+    for attempt in attempts:
         try:
             show_image(data, attempt)
             return
@@ -95,7 +111,7 @@ def handle_tan_response(fints: CleanabFinTSClient, tan_response: NeedTANResponse
     else:
         logger.info(tan_response.challenge_html)
 
-    tan: str = input("Please enter the TAN: ")
+    tan: str = read_line("Please enter the TAN: ").strip()
 
     try:
         response = fints.send_tan(tan_response, tan)
@@ -106,8 +122,7 @@ def handle_tan_response(fints: CleanabFinTSClient, tan_response: NeedTANResponse
             logger.info("TAN accepted, proceeding with the request.")
             return response
     except FinTSClientError as e:
-        logger.error(f"Failed to send TAN: {e}")
-        return []
+        raise TanFailed(f"Failed to send TAN: {e}") from e
 
 
 def retrieve_transactions(sepa_account, fints: CleanabFinTSClient, *, start_date, end_date):
@@ -129,15 +144,25 @@ def retrieve_holdings(sepa_account, fints: CleanabFinTSClient):
 
 
 def get_fints_client(blz, username, password, endpoint, product_id, *, tan_display: TanDisplayMode):
-    """The logged-in client for a bank login; ``tan_display`` is not part of the cache key."""
+    """The logged-in client and SEPA accounts for a bank login; ``tan_display`` is not part of the cache key.
+
+    Failed logins (wrong PIN, rejected TAN, ...) are remembered too and raise ``LoginSkipped`` afterwards: logging
+    in again for every other account at this bank would repeat the PIN/TAN attempt, and banks lock online banking
+    after a few failures.
+    """
     key = (blz, username, password, endpoint, product_id)
     if key not in _clients:
-        # Failed logins (e.g. a rejected TAN) are remembered too: logging in again for every other account at this
-        # bank would repeat the PIN/TAN attempt, and banks lock online banking after a few failures.
-        _clients[key] = _connect(*key, tan_display=tan_display)
-    elif not _clients[key][1]:
-        logger.warning("Skipping login for %s at %s, it already failed in this run", username, endpoint)
-    return _clients[key]
+        try:
+            _clients[key] = _connect(*key, tan_display=tan_display)
+        except Exception as e:
+            _clients[key] = e
+            raise
+    outcome = _clients[key]
+    if isinstance(outcome, Exception):
+        raise LoginSkipped(
+            f"Skipping login for {username} at {endpoint}, it already failed in this run: {outcome}"
+        ) from None
+    return outcome
 
 
 def _connect(blz, username, password, endpoint, product_id, *, tan_display: TanDisplayMode):

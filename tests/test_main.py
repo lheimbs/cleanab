@@ -6,6 +6,7 @@ import pytest
 
 from cleanab import main as main_module
 from cleanab.apps.base import BaseApp
+from cleanab.fints import LoginSkipped
 from cleanab.main import Cleanab
 from cleanab.models import account_config as account_config_module
 from cleanab.models.config import Config
@@ -138,3 +139,26 @@ def test_run_without_transactions_does_nothing(make_cleanab, fints):
     cleanab = make_cleanab()
     cleanab.run()
     assert cleanab.config.get_apps()[0].created == []
+
+
+def test_processor_skips_failed_login_without_traceback(make_cleanab, monkeypatch):
+    def skipped(*args, **kwargs):
+        raise LoginSkipped("Skipping login for user at url, it already failed in this run")
+
+    warnings, tracebacks = [], []
+    monkeypatch.setattr(main_module, "process_fints_account", skipped)
+    monkeypatch.setattr(main_module.logger, "warning", lambda msg, *a: warnings.append(msg % a))
+    monkeypatch.setattr(main_module.logger, "exception", lambda *a: tracebacks.append(a))
+    cleanab = make_cleanab()
+    assert cleanab.processor(cleanab.accounts[0]) == []
+    assert "already failed" in warnings[-1]
+    assert tracebacks == []
+
+
+def test_setup_does_not_probe_the_terminal(make_cleanab, monkeypatch):
+    from cleanab import tan_display
+
+    monkeypatch.setattr(tan_display, "kitty_graphics_supported", lambda: pytest.fail("probed at startup"))
+    monkeypatch.setenv("KITTY_WINDOW_ID", "1")
+    monkeypatch.delenv("CLEANAB_TAN_DISPLAY", raising=False)
+    assert make_cleanab().tan_display == "auto"
