@@ -23,9 +23,18 @@ _CARD_PREFIX = re.compile(
 # "SUMUP *BAECKEREI", "PAYPAL *SPOTIFY", "PP.1234.PP . MERCHANT"
 _INTERMEDIARY = re.compile(r"^(?:sumup|paypal|zettle|sq)\s*\*\s*", re.IGNORECASE)
 # "AMZN Mktp DE*AB12CD34", "Amazon.de*AB12CD": the part after "*" is a per-order reference, not a merchant.
-_AMAZON = re.compile(r"^(?:amzn mktp de|amazon\.de|amz)\s*\*\s*\S+", re.IGNORECASE)
+# The whole descriptor (with or without "*ref", plus suffixes such as "AMZN.COM/BILL") becomes "amazon".
+_AMAZON = re.compile(
+    r"^(?:amzn mktp de|amazon\.de|amz)(?:\s*\*\s*\S+)?(?:\s+(?:amazon\.de|amzn\.com/bill|amzn mktp de))*\b",
+    re.IGNORECASE,
+)
+# cleanab imports transactions without an applicant as "Unnamed"; that is no payee, so it must not group them.
+_PLACEHOLDER_PAYEES = {"unnamed"}
+# Fold umlauts so "Bäckerei Müller" and the transliterated "BAECKEREI MUELLER" share a key.
+_UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 _PAYPAL_PP = re.compile(r"^pp\.\d+\.pp\s*\.\s*", re.IGNORECASE)
-_NOISE = re.compile(r"[^\w\s&./-]", re.UNICODE)
+# Hyphens count as spaces, so "REWE-Markt" and "REWE Markt" match.
+_NOISE = re.compile(r"[^\w\s&./]", re.UNICODE)
 _SPACES = re.compile(r"\s+")
 
 
@@ -45,7 +54,8 @@ def normalize_text(text: str | None) -> str:
     text = _TIME.sub(" ", text)
     text = _LONG_NUMBER.sub(" ", text)
     text = _NOISE.sub(" ", text)
-    return _SPACES.sub(" ", text).strip().lower()
+    text = _SPACES.sub(" ", text).strip().lower().translate(_UMLAUTS)
+    return "" if text in _PLACEHOLDER_PAYEES else text
 
 
 def model_text(payee: str | None, purpose: str | None) -> str:

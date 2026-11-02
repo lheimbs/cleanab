@@ -213,3 +213,22 @@ def test_fraction_validation(evaluate_script):
     for bad in ("0", "1", "-0.2"):
         with pytest.raises(argparse.ArgumentTypeError):
             evaluate_script.fraction(bad)
+
+
+def test_online_offers_only_categories_seen_so_far(evaluate_script):
+    from cleanab.classifier.base import Example, Prediction
+
+    offered = []
+
+    class Recording(evaluate_script.ExactPayeeClassifier):
+        def predict(self, example, categories):
+            offered.append(list(categories))
+            return Prediction(None)
+
+    examples = [
+        Example("a", category="Food", date=date(2024, 1, 1)),
+        Example("b", category="Subs", date=date(2024, 1, 2)),
+        Example("c", category="Food", date=date(2024, 1, 3)),
+    ]
+    evaluate_script.run_online(Recording, examples, ["Food", "Subs"], warmup=0, target=0.9)
+    assert offered == [[], ["Food"], ["Food", "Subs"]]

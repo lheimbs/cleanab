@@ -91,6 +91,13 @@ def fraction(value: str) -> float:
     return number
 
 
+def precision(value: str) -> float:
+    number = float(value)
+    if not 0 < number <= 1:
+        raise argparse.ArgumentTypeError("must be a fraction in (0, 1], e.g. 0.95")
+    return number
+
+
 def parse_classifiers(value: str) -> list[str]:
     names = [name.strip() for name in value.split(",") if name.strip()]
     unknown = [name for name in names if name not in CLASSIFIERS]
@@ -278,7 +285,9 @@ def run_online(
     for index, example in enumerate(examples):
         payee = normalize_text(example.payee)
         if index >= warmup:
-            scored.append((example, classifier.predict(example, categories), payee not in seen))
+            # Only categories that existed by then: a real import cannot offer one created months later.
+            offered = [c for c in categories if c in seen_categories]
+            scored.append((example, classifier.predict(example, offered), payee not in seen))
         new = payee not in seen or example.category not in seen_categories
         if payee:  # payees that normalize to "" are unrelated, so each one counts as a first occurrence
             seen.add(payee)
@@ -335,7 +344,9 @@ def main() -> None:
         help="replay in date order, predicting each transaction from earlier history only; "
         "reports first occurrences of a payee separately",
     )
-    parser.add_argument("--warmup", type=int, default=100, help="--online: transactions used only as initial history")
+    parser.add_argument(
+        "--warmup", type=positive_int(0), default=100, help="--online: transactions used only as initial history"
+    )
     parser.add_argument(
         "--refit-every",
         type=positive_int(1),
@@ -346,8 +357,10 @@ def main() -> None:
     parser.add_argument(
         "--descriptions", type=Path, help="YAML/JSON file mapping category name to a one-line description"
     )
-    parser.add_argument("--errors", type=int, default=0, metavar="N", help="list the N most confident mistakes")
-    parser.add_argument("--precision", type=float, default=0.95, help="target precision for auto-assignment")
+    parser.add_argument(
+        "--errors", type=positive_int(0), default=0, metavar="N", help="list the N most confident mistakes"
+    )
+    parser.add_argument("--precision", type=precision, default=0.95, help="target precision for auto-assignment")
     args = parser.parse_args()
 
     if args.descriptions:

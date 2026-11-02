@@ -52,9 +52,11 @@ groups; pick a production threshold on earlier data.
 
 `char-ngram-lr` and `hybrid-lite` need scikit-learn (the `ml-lite` extra, also in the dev group).
 
-The category list comes from the whole dataset, so zero-shot models may be offered categories created
-after a transaction's date, and grouped CV trains on later transactions of other payees. Both are
-deliberate: they isolate the payee effect rather than replay history (use `--online` for that).
+For the chronological split and grouped CV the category list comes from the whole dataset, so zero-shot
+models may be offered categories created after a transaction's date, and grouped CV trains on later
+transactions of other payees. Both are deliberate: they isolate the payee effect rather than replay
+history. `--online` replays history: it offers only categories that already occurred, so the first
+transaction of a new category always counts as an error.
 
 ## Unseen-payee evaluation
 
