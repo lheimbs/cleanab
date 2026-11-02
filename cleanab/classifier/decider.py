@@ -7,6 +7,7 @@ from .normalize import model_text
 
 DEFAULT_REPO = "Mapika/decider-4b-GGUF"
 DEFAULT_FILE = "decider-4b-v3-Q4_K_M.gguf"
+MIN_OPTIONS, MAX_OPTIONS = 2, 255
 
 
 class DeciderClassifier:
@@ -43,6 +44,8 @@ class DeciderClassifier:
         return "\n".join(lines)
 
     def predict(self, example: Example, categories: list[str]) -> Prediction:
+        if not MIN_OPTIONS <= len(categories) <= MAX_OPTIONS:
+            return Prediction(None)  # the decider only accepts this many options per question
         state = "Bank transaction (German): " + model_text(example.payee, example.purpose)
         answer = self._load().decide(state, [{"question": self._question(categories), "options": categories}])[0]
         probs = {k: float(v) for k, v in answer.get("probs", {}).items() if k in categories}

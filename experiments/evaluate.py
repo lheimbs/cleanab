@@ -1,6 +1,7 @@
 """Evaluate classifiers on a labeled export of your own categorized transactions.
 
-CSV columns: date (YYYY-MM-DD), payee, purpose, category. See experiments/README.md.
+CSV columns: date (YYYY-MM-DD), payee, purpose, category (optional: imported_payee, reconciled).
+See experiments/README.md.
 
     uv run python -m experiments.evaluate data/transactions.csv --classifiers exact-payee,char-ngram-lr
 """
@@ -12,6 +13,7 @@ import csv
 import hashlib
 import time
 from datetime import date
+from functools import cache
 from pathlib import Path
 
 from cleanab.classifier.base import Classifier, Example
@@ -26,17 +28,18 @@ def _gliner() -> Classifier:
     return GlinerClassifier(descriptions=DESCRIPTIONS)
 
 
+@cache
 def _decider() -> Classifier:
+    """One shared instance: the decider ignores history, so CV folds and hybrids can reuse the loaded model."""
     from cleanab.classifier.decider import DeciderClassifier
 
     return DeciderClassifier(descriptions=DESCRIPTIONS)
 
 
 def _hybrid() -> Classifier:
-    from cleanab.classifier.decider import DeciderClassifier
     from cleanab.classifier.hybrid import HybridClassifier
 
-    return HybridClassifier([CharNgramClassifier(), DeciderClassifier(descriptions=DESCRIPTIONS)], "hybrid")
+    return HybridClassifier([CharNgramClassifier(), _decider()], "hybrid")
 
 
 def _hybrid_lite() -> Classifier:
@@ -46,11 +49,10 @@ def _hybrid_lite() -> Classifier:
 
 
 def _hybrid_full() -> Classifier:
-    from cleanab.classifier.decider import DeciderClassifier
     from cleanab.classifier.hybrid import HybridClassifier
 
     ngram = CharNgramClassifier()
-    return HybridClassifier([ngram, DeciderClassifier(descriptions=DESCRIPTIONS)], "hybrid-full", known=ngram)
+    return HybridClassifier([ngram, _decider()], "hybrid-full", known=ngram)
 
 
 DESCRIPTIONS: dict[str, str] = {}
@@ -64,17 +66,46 @@ CLASSIFIERS = {
     "hybrid-lite": _hybrid_lite,
     "hybrid-full": _hybrid_full,
 }
+# Classifiers that need neither the `models` group nor a model download.
+DEFAULT_CLASSIFIERS = "exact-payee,char-ngram-lr,hybrid-lite"
+PAYEE_COLUMNS = ("imported_payee", "payee")
+
+
+def parse_classifiers(value: str) -> list[str]:
+    names = [name.strip() for name in value.split(",") if name.strip()]
+    unknown = [name for name in names if name not in CLASSIFIERS]
+    if unknown or not names:
+        raise argparse.ArgumentTypeError(
+            f"unknown classifier(s) {', '.join(unknown) or '(none)'}; choose from {', '.join(CLASSIFIERS)}"
+        )
+    return names
+
+
+def payee_of(row: dict, column: str) -> str:
+    """The payee text to classify.
+
+    `imported_payee` is what cleanab sends at import time. Actual's `payee` is the current payee name, which
+    reflects later renames and merges, so evaluating on it leaks future cleanup into past transactions.
+    Rows without an imported payee (entered by hand in Actual) fall back to `payee`.
+    """
+    if column == "imported_payee":
+        return row.get("imported_payee") or row["payee"]
+    return row["payee"]
 
 
 def load_examples(
-    path: Path, since: date | None = None, until: date | None = None, reconciled_only: bool = False
+    path: Path,
+    since: date | None = None,
+    until: date | None = None,
+    reconciled_only: bool = False,
+    payee_column: str = "imported_payee",
 ) -> list[Example]:
     """Load labeled rows, optionally only those within [since, until] or marked reconciled in Actual."""
     with path.open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     examples = [
         Example(
-            payee=row["payee"],
+            payee=payee_of(row, payee_column),
             purpose=row.get("purpose", ""),
             category=row["category"] or None,
             date=date.fromisoformat(row["date"]),
@@ -125,7 +156,8 @@ def run(
     errors: int = 0,
 ):
     classifier.fit(train)
-    seen_payees = {normalize_text(e.payee) for e in train}
+    # An empty normalized payee says nothing about the payee, so never count it as seen.
+    seen_payees = {normalize_text(e.payee) for e in train} - {""}
     started = time.perf_counter()
     predictions = [classifier.predict(e, categories) for e in test]
     elapsed = time.perf_counter() - started
@@ -147,10 +179,12 @@ def run(
 def group_folds(examples: list[Example], folds: int) -> list[int]:
     """Assign each example to a fold so that all transactions of one payee share a fold (stable across runs)."""
 
-    def fold_of(example: Example) -> int:
-        return int(hashlib.md5(normalize_text(example.payee).encode()).hexdigest(), 16) % folds
+    def fold_of(index: int, example: Example) -> int:
+        # Payees that normalize to "" are unrelated to each other; spread them instead of piling them in one fold.
+        key = normalize_text(example.payee) or f"\0{index}"
+        return int(hashlib.md5(key.encode()).hexdigest(), 16) % folds
 
-    return [fold_of(e) for e in examples]
+    return [fold_of(i, e) for i, e in enumerate(examples)]
 
 
 def run_grouped_cv(
@@ -183,7 +217,13 @@ def run_grouped_cv(
 
 
 def run_online(
-    factory, examples: list[Example], categories: list[str], warmup: int, target: float, errors: int = 0
+    factory,
+    examples: list[Example],
+    categories: list[str],
+    warmup: int,
+    target: float,
+    errors: int = 0,
+    refit_every: int = 1,
 ) -> None:
     """Replay the transactions in date order, as a real import would see them.
 
@@ -191,17 +231,25 @@ def run_online(
     confirmed the category). The first `warmup` transactions only build history. Results are split into
     first occurrences of a payee (cold start, where a model has to earn its keep) and repeats (which the
     history already covers).
+
+    With `refit_every` > 1 the classifier is refit only every that many transactions (and whenever a payee
+    or category shows up for the first time), which is much faster for trained models; in between, it
+    predicts from slightly older history.
     """
     classifier = factory()
     seen: set[str] = set()
+    seen_categories: set[str] = set()
     scored: list[tuple[Example, object, bool]] = []
     started = time.perf_counter()
     for index, example in enumerate(examples):
         payee = normalize_text(example.payee)
         if index >= warmup:
             scored.append((example, classifier.predict(example, categories), payee not in seen))
+        new = payee not in seen or example.category not in seen_categories
         seen.add(payee)
-        classifier.fit(examples[: index + 1])
+        seen_categories.add(example.category)
+        if new or (index + 1) % refit_every == 0:
+            classifier.fit(examples[: index + 1])
     elapsed = time.perf_counter() - started
 
     name = classifier.name
@@ -221,7 +269,20 @@ def run_online(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("data", type=Path)
-    parser.add_argument("--classifiers", default=",".join(CLASSIFIERS))
+    parser.add_argument(
+        "--classifiers",
+        type=parse_classifiers,
+        default=DEFAULT_CLASSIFIERS,
+        help=f"comma-separated, from {', '.join(CLASSIFIERS)} (default: {DEFAULT_CLASSIFIERS}; "
+        "gliner2, decider-4b and hybrid/hybrid-full need `uv sync --group models` and download model weights)",
+    )
+    parser.add_argument(
+        "--payee-column",
+        choices=PAYEE_COLUMNS,
+        default="imported_payee",
+        help="imported_payee (default) is what cleanab sees at import; payee is Actual's current, possibly "
+        "renamed or merged payee and leaks later cleanup into the evaluation",
+    )
     parser.add_argument("--train-fraction", type=float, default=0.8)
     parser.add_argument("--since", type=date.fromisoformat, help="only use transactions from this date (YYYY-MM-DD)")
     parser.add_argument("--until", type=date.fromisoformat, help="only use transactions up to this date (YYYY-MM-DD)")
@@ -240,6 +301,13 @@ def main() -> None:
     )
     parser.add_argument("--warmup", type=int, default=100, help="--online: transactions used only as initial history")
     parser.add_argument(
+        "--refit-every",
+        type=int,
+        default=1,
+        metavar="N",
+        help="--online: refit only every N transactions (and on new payees/categories); faster, slightly stale",
+    )
+    parser.add_argument(
         "--descriptions", type=Path, help="YAML/JSON file mapping category name to a one-line description"
     )
     parser.add_argument("--errors", type=int, default=0, metavar="N", help="list the N most confident mistakes")
@@ -250,27 +318,29 @@ def main() -> None:
         import yaml
 
         DESCRIPTIONS.update(yaml.safe_load(args.descriptions.read_text(encoding="utf-8")) or {})
-    examples = load_examples(args.data, args.since, args.until, args.reconciled_only)
+    examples = load_examples(args.data, args.since, args.until, args.reconciled_only, args.payee_column)
     categories = sorted({e.category for e in examples})
     if args.online:
         print(
             f"{len(examples)} labeled transactions, {len(categories)} categories; online replay, warmup {args.warmup}"
         )
-        for name in args.classifiers.split(","):
-            run_online(CLASSIFIERS[name], examples, categories, args.warmup, args.precision, args.errors)
+        for name in args.classifiers:
+            run_online(
+                CLASSIFIERS[name], examples, categories, args.warmup, args.precision, args.errors, args.refit_every
+            )
         return
     if args.group_cv:
         print(
             f"{len(examples)} labeled transactions, {len(categories)} categories; payee-grouped {args.group_cv}-fold CV"
         )
-        for name in args.classifiers.split(","):
+        for name in args.classifiers:
             run_grouped_cv(CLASSIFIERS[name], examples, categories, args.group_cv, args.precision, args.errors)
         return
 
     train, test = time_split(examples, args.train_fraction)
     print(f"{len(examples)} labeled transactions, {len(categories)} categories; train {len(train)} / test {len(test)}")
 
-    for name in args.classifiers.split(","):
+    for name in args.classifiers:
         run(CLASSIFIERS[name](), train, test, categories, args.precision, args.errors)
 
 

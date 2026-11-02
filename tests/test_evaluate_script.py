@@ -114,3 +114,60 @@ def test_online_replay_separates_first_occurrences(evaluate_script, capsys):
     output = capsys.readouterr().out
     assert "scored 6 transactions, 1 first occurrences" in output  # only Rewe is new after the warmup
     assert "first occurr." in output and "repeat" in output
+
+
+def test_load_examples_prefers_imported_payee(evaluate_script, tmp_path):
+    csv_path = tmp_path / "t.csv"
+    csv_path.write_text(
+        "date,payee,purpose,category,imported_payee\n"
+        "2024-01-01,REWE,,Food,REWE MARKT GMBH 1234\n"
+        "2024-01-02,Cash,,Food,\n",
+        encoding="utf-8",
+    )
+    assert [e.payee for e in evaluate_script.load_examples(csv_path)] == ["REWE MARKT GMBH 1234", "Cash"]
+    by_payee = evaluate_script.load_examples(csv_path, payee_column="payee")
+    assert [e.payee for e in by_payee] == ["REWE", "Cash"]
+
+
+def test_load_examples_without_imported_payee_column_uses_payee(evaluate_script, tmp_path):
+    csv_path = tmp_path / "t.csv"
+    write_csv(csv_path, [("2024-01-01", "A", "", "Cat")])
+    assert [e.payee for e in evaluate_script.load_examples(csv_path)] == ["A"]
+
+
+def test_parse_classifiers_rejects_unknown_names(evaluate_script):
+    import argparse
+
+    assert evaluate_script.parse_classifiers("exact-payee, char-ngram-lr") == ["exact-payee", "char-ngram-lr"]
+    with pytest.raises(argparse.ArgumentTypeError, match="nope"):
+        evaluate_script.parse_classifiers("exact-payee,nope")
+
+
+def test_default_classifiers_need_no_model_download(evaluate_script):
+    names = evaluate_script.parse_classifiers(evaluate_script.DEFAULT_CLASSIFIERS)
+    assert not {"gliner2", "decider-4b", "hybrid", "hybrid-full"} & set(names)
+
+
+def test_group_folds_spread_empty_payees(evaluate_script):
+    from cleanab.classifier.base import Example
+
+    examples = [Example("12345", category="x") for _ in range(30)]  # all normalize to ""
+    assert len(set(evaluate_script.group_folds(examples, 5))) > 1
+
+
+def test_online_refit_every_still_refits_on_new_payees(evaluate_script, capsys):
+    from cleanab.classifier.base import Example
+
+    fits = []
+
+    class Counting(evaluate_script.ExactPayeeClassifier):
+        def fit(self, history):
+            fits.append(len(history))
+            super().fit(history)
+
+    payees = ["Edeka", "Edeka", "Edeka", "Netflix", "Edeka", "Netflix", "Edeka", "Edeka"]
+    category = {"Edeka": "Food", "Netflix": "Subs"}
+    examples = [Example(p, category=category[p], date=date(2024, 1, i + 1)) for i, p in enumerate(payees)]
+    evaluate_script.run_online(Counting, examples, ["Food", "Subs"], warmup=0, target=0.9, refit_every=4)
+    assert fits == [1, 4, 8]  # first Edeka, first Netflix (also the 4th), then every 4th
+    assert "repeat" in capsys.readouterr().out

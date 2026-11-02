@@ -23,4 +23,15 @@ def test_unknown_choice_abstains():
 
     classifier = DeciderClassifier()
     classifier._decider = Fake()
+    assert classifier.predict(Example("x"), ["Food", "Bills"]).category is None
+
+
+def test_too_few_categories_abstains_without_calling_the_model():
+    class Fake:
+        def decide(self, state, questions):
+            raise AssertionError("must not be called")
+
+    classifier = DeciderClassifier()
+    classifier._decider = Fake()
     assert classifier.predict(Example("x"), ["Food"]).category is None
+    assert classifier.predict(Example("x"), []).category is None

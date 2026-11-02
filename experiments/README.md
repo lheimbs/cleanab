@@ -19,14 +19,29 @@ Transfers and split transactions are skipped.
 
 ## Data
 
-A CSV with the columns `date` (YYYY-MM-DD), `payee`, `purpose`, `category` (plus optional `reconciled`),
-one row per categorized transaction. Keep it out of git (`experiments/data/` is ignored).
+A CSV with the columns `date` (YYYY-MM-DD), `payee`, `purpose`, `category` (plus optional
+`imported_payee` and `reconciled`), one row per categorized transaction. Keep it out of git
+(`experiments/data/` is ignored).
+
+By default the payee text is `imported_payee`, which is what cleanab sends at import time. Actual's `payee`
+is the *current* payee name: renaming or merging a payee in Actual rewrites it for all past transactions,
+so evaluating on it leaks later cleanup into the past and makes new payees look more familiar than they
+are. `--payee-column payee` restores the old behaviour for comparison. Rows without an imported payee
+(entered by hand) fall back to `payee`.
+
+Two caveats the evaluation cannot fix: `purpose` is Actual's `notes`, which you may have edited, and some
+categories may have been filled in by Actual's own payee rules rather than chosen by you.
+`--reconciled-only` reduces, but does not remove, the second effect.
 
 ## Run
 
 ```sh
 uv run python -m experiments.evaluate experiments/data/transactions.csv
 ```
+
+This runs `exact-payee`, `char-ngram-lr` and `hybrid-lite`. The model backends (`gliner2`, `decider-4b`,
+`hybrid`, `hybrid-full`) need `uv sync --group models` and download several GB of weights on first use;
+pick them with `--classifiers`.
 
 The data is split chronologically (default 80/20). Results are reported for all test
 transactions and separately for payees seen / not seen in training, since the unseen group
@@ -54,3 +69,6 @@ has to help) are reported separately from repeats (which the history already cov
 uv run python -m experiments.evaluate experiments/data/transactions.csv \
   --since 2023-01-01 --until 2024-03-31 --online --warmup 100 --errors 15
 ```
+
+Trained models are refit after every transaction, which gets slow for a few thousand transactions.
+`--refit-every 50` refits only every 50 transactions and whenever a new payee or category appears.

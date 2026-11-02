@@ -19,11 +19,13 @@ class ExactPayeeClassifier:
     def fit(self, history: list[Example]) -> None:
         self._by_payee.clear()
         for example in history:
-            if example.category:
-                self._by_payee[normalize_text(example.payee)][example.category] += 1
+            key = normalize_text(example.payee)
+            if example.category and key:  # an empty key would lump unrelated payees together
+                self._by_payee[key][example.category] += 1
 
     def predict(self, example: Example, categories: list[str]) -> Prediction:
-        counts = self._by_payee.get(normalize_text(example.payee))
+        key = normalize_text(example.payee)
+        counts = self._by_payee.get(key) if key else None
         if not counts:
             return Prediction(None)
         total = sum(counts.values())
@@ -31,7 +33,7 @@ class ExactPayeeClassifier:
         if not scores:
             return Prediction(None)
         best = max(scores, key=scores.__getitem__)
-        # Few observations should not look as certain as many: shrink towards 0.5 for tiny samples.
+        # Few observations should not look as certain as many: shrink towards 0 for tiny samples.
         confidence = scores[best] * total / (total + 1)
         return Prediction(best, confidence, scores)
 
