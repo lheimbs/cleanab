@@ -7,8 +7,8 @@ import re
 # SEPA purpose tags such as "SVWZ+", "EREF+<ref>", "MREF+<ref>", "CRED+<id>", "KREF+<ref>".
 # The reference tags carry opaque ids, so the value is dropped; SVWZ is the actual purpose text.
 _REFERENCE_TAGS = re.compile(r"\b(?:EREF|MREF|CRED|KREF|ABWA|ABWE|BREF|OAMT|COAM)\+\S*", re.IGNORECASE)
-# The tag must be followed by "+"/":" or end as a word, so "Bicycle" or "Ibanez" stay intact.
-_PLAIN_TAGS = re.compile(r"\b(?:SVWZ|IBAN|BIC)(?:[+:]|\b)\s*", re.IGNORECASE)
+# Only with "+"/":" so that names such as "Bicycle", "Ibanez" or "Bic GmbH" stay intact.
+_PLAIN_TAGS = re.compile(r"\b(?:SVWZ|IBAN|BIC)[+:]\s*", re.IGNORECASE)
 _IBAN = re.compile(r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}\s?[A-Z0-9]{1,4}\b")
 _DATE = re.compile(r"\b\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})?(?=\D|$)")
 _TIME = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b")
@@ -31,9 +31,10 @@ def normalize_text(text: str | None) -> str:
     text = _IBAN.sub(" ", text)
     text = _REFERENCE_TAGS.sub(" ", text)
     text = _PLAIN_TAGS.sub(" ", text)
-    text = _PAYPAL_PP.sub("", text.strip())
+    # Card prefix first: "VISA PAYPAL *SPOTIFY" must end up as "spotify", like "PAYPAL *SPOTIFY".
+    text = _CARD_PREFIX.sub("", text.strip())
+    text = _PAYPAL_PP.sub("", text)
     text = _INTERMEDIARY.sub("", text)
-    text = _CARD_PREFIX.sub("", text)
     text = _DATE.sub(" ", text)
     text = _TIME.sub(" ", text)
     text = _LONG_NUMBER.sub(" ", text)

@@ -274,7 +274,8 @@ def run_online(
     elapsed = time.perf_counter() - started
 
     name = classifier.name
-    distinct_cold = len({normalize_text(e.payee) for e, _, cold in scored if cold})
+    cold_keys = [normalize_text(e.payee) for e, _, cold in scored if cold]
+    distinct_cold = len(set(cold_keys) - {""}) + cold_keys.count("")  # empty keys are separate payees
     print(f"{name}: scored {len(scored)} transactions, {sum(c for _, _, c in scored)} first occurrences")
     for label, keep in (("all", lambda c: True), ("first occurr.", lambda c: c), ("repeat", lambda c: not c)):
         chosen = [(e, p) for e, p, cold in scored if keep(cold)]

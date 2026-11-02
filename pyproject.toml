@@ -36,6 +36,10 @@ dev = [
     "scikit-learn>=1.7.2",
 ]
 
+[tool.setuptools.packages.find]
+# experiments/ is a package too (for `python -m experiments...`) but must not end up in the wheel.
+include = ["cleanab*"]
+
 [tool.uv]
 
 [tool.uv.sources]

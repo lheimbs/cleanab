@@ -82,10 +82,14 @@ def summarize(rows: list[dict]) -> None:
         print(f"{month:8} {total:6} {categorized:12} {total - categorized:14} {reconciled:11}")
 
 
+# Next to this script, so the gitignored data/ is used no matter where the command is run from.
+DEFAULT_OUTPUT = Path(__file__).resolve().parent / "data" / "transactions.csv"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("-c", "--config", type=Path, required=True, help="cleanab config with an apps.actual section")
-    parser.add_argument("-o", "--output", type=Path, default=Path("experiments/data/transactions.csv"))
+    parser.add_argument("-o", "--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--since", default="2020-01-01", help="earliest transaction date (YYYY-MM-DD)")
     parser.add_argument("--until", default=None, help="latest transaction date (YYYY-MM-DD)")
     args = parser.parse_args()
