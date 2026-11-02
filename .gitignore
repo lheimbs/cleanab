@@ -7,3 +7,6 @@ __pycache__
 .sops.yaml
 config.sops.yaml
 experiments/data/
+build/
+dist/
+*.egg-info/

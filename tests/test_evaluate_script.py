@@ -194,3 +194,22 @@ def test_option_validation(evaluate_script):
     with pytest.raises(argparse.ArgumentTypeError):
         evaluate_script.positive_int(2)("1")
     assert evaluate_script.positive_int(1)("3") == 3
+
+
+def test_rows_without_imported_payee_are_counted(evaluate_script, tmp_path, capsys):
+    csv_path = tmp_path / "t.csv"
+    csv_path.write_text(
+        "date,payee,purpose,category,imported_payee\n2024-01-01,A,,Cat,A RAW\n2024-01-02,B,,Cat,\n",
+        encoding="utf-8",
+    )
+    evaluate_script.load_examples(csv_path)
+    assert "1 labeled rows have no imported_payee" in capsys.readouterr().err
+
+
+def test_fraction_validation(evaluate_script):
+    import argparse
+
+    assert evaluate_script.fraction("0.8") == 0.8
+    for bad in ("0", "1", "-0.2"):
+        with pytest.raises(argparse.ArgumentTypeError):
+            evaluate_script.fraction(bad)

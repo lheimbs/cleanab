@@ -5,20 +5,25 @@ from __future__ import annotations
 import re
 
 # SEPA purpose tags such as "SVWZ+", "EREF+<ref>", "MREF+<ref>", "CRED+<id>", "KREF+<ref>".
-# The reference tags carry opaque ids, so the value is dropped; SVWZ is the actual purpose text.
-_REFERENCE_TAGS = re.compile(r"\b(?:EREF|MREF|CRED|KREF|ABWA|ABWE|BREF|OAMT|COAM)\+\S*", re.IGNORECASE)
+# The reference tags carry opaque ids, so the value is dropped; SVWZ is the actual purpose text and
+# ABWA/ABWE (ultimate debtor/creditor) carry a name, so only their tag goes.
+_REFERENCE_TAGS = re.compile(r"\b(?:EREF|MREF|CRED|KREF|BREF|OAMT|COAM)\+\S*", re.IGNORECASE)
 # Only with "+"/":" so that names such as "Bicycle", "Ibanez" or "Bic GmbH" stay intact.
-_PLAIN_TAGS = re.compile(r"\b(?:SVWZ|IBAN|BIC)[+:]\s*", re.IGNORECASE)
+_PLAIN_TAGS = re.compile(r"\b(?:SVWZ|ABWA|ABWE|IBAN|BIC)[+:]\s*", re.IGNORECASE)
 _IBAN = re.compile(r"\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}\s?[A-Z0-9]{1,4}\b")
 _DATE = re.compile(r"\b\d{1,2}\.\d{1,2}\.(?:\d{2}|\d{4})?(?=\D|$)")
 _TIME = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b")
 _LONG_NUMBER = re.compile(r"\b\d{4,}\b")
+# Repeated, so stacked prefixes such as "Kartenzahlung girocard REWE" go as well.
 _CARD_PREFIX = re.compile(
-    r"^(?:kaufumsatz|lastschrift|girocard|visa(?: card)?|mastercard|debitkarte|kartenzahlung|pos|poz|elv)\b[\s:.\-]*",
+    r"^(?:(?:kaufumsatz|lastschrift|girocard|visa(?: card)?|mastercard|debitkarte|kartenzahlung|pos|poz|elv)"
+    r"\b[\s:.\-]*)+",
     re.IGNORECASE,
 )
-# "SUMUP *BAECKEREI", "PAYPAL *SPOTIFY", "PP.1234.PP . MERCHANT", "AMZN Mktp DE*AB12"
-_INTERMEDIARY = re.compile(r"^(?:sumup|paypal|zettle|sq|amzn mktp de|amz)\s*\*\s*", re.IGNORECASE)
+# "SUMUP *BAECKEREI", "PAYPAL *SPOTIFY", "PP.1234.PP . MERCHANT"
+_INTERMEDIARY = re.compile(r"^(?:sumup|paypal|zettle|sq)\s*\*\s*", re.IGNORECASE)
+# "AMZN Mktp DE*AB12CD34", "Amazon.de*AB12CD": the part after "*" is a per-order reference, not a merchant.
+_AMAZON = re.compile(r"^(?:amzn mktp de|amazon\.de|amz)\s*\*\s*\S+", re.IGNORECASE)
 _PAYPAL_PP = re.compile(r"^pp\.\d+\.pp\s*\.\s*", re.IGNORECASE)
 _NOISE = re.compile(r"[^\w\s&./-]", re.UNICODE)
 _SPACES = re.compile(r"\s+")
@@ -35,6 +40,7 @@ def normalize_text(text: str | None) -> str:
     text = _CARD_PREFIX.sub("", text.strip())
     text = _PAYPAL_PP.sub("", text)
     text = _INTERMEDIARY.sub("", text)
+    text = _AMAZON.sub("amazon ", text)
     text = _DATE.sub(" ", text)
     text = _TIME.sub(" ", text)
     text = _LONG_NUMBER.sub(" ", text)

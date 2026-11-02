@@ -84,6 +84,13 @@ def positive_int(minimum: int):
     return parse
 
 
+def fraction(value: str) -> float:
+    number = float(value)
+    if not 0 < number < 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return number
+
+
 def parse_classifiers(value: str) -> list[str]:
     names = [name.strip() for name in value.split(",") if name.strip()]
     unknown = [name for name in names if name not in CLASSIFIERS]
@@ -123,6 +130,13 @@ def load_examples(
             "into the evaluation); re-export with experiments.export_actual",
             file=sys.stderr,
         )
+    if payee_column == "imported_payee" and "imported_payee" in (reader.fieldnames or []):
+        fallbacks = sum(1 for row in rows if row.get("category") and not row.get("imported_payee"))
+        if fallbacks:
+            print(
+                f"note: {fallbacks} labeled rows have no imported_payee and use Actual's current payee name",
+                file=sys.stderr,
+            )
     examples = [
         Example(
             payee=payee_of(row, payee_column),
@@ -305,7 +319,7 @@ def main() -> None:
         help="imported_payee (default) is what cleanab sees at import; payee is Actual's current, possibly "
         "renamed or merged payee and leaks later cleanup into the evaluation",
     )
-    parser.add_argument("--train-fraction", type=float, default=0.8)
+    parser.add_argument("--train-fraction", type=fraction, default=0.8, help="chronological split (0 < x < 1)")
     parser.add_argument("--since", type=date.fromisoformat, help="only use transactions from this date (YYYY-MM-DD)")
     parser.add_argument("--until", type=date.fromisoformat, help="only use transactions up to this date (YYYY-MM-DD)")
     parser.add_argument("--reconciled-only", action="store_true", help="only use transactions reconciled in Actual")
@@ -339,7 +353,10 @@ def main() -> None:
     if args.descriptions:
         import yaml
 
-        DESCRIPTIONS.update(yaml.safe_load(args.descriptions.read_text(encoding="utf-8")) or {})
+        descriptions = yaml.safe_load(args.descriptions.read_text(encoding="utf-8")) or {}
+        if not isinstance(descriptions, dict):
+            parser.error("--descriptions must map category names to descriptions")
+        DESCRIPTIONS.update({str(k): str(v) for k, v in descriptions.items()})
     examples = load_examples(args.data, args.since, args.until, args.reconciled_only, args.payee_column)
     categories = sorted({e.category for e in examples})
     if args.online:
