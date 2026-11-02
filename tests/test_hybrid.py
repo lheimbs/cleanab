@@ -44,3 +44,21 @@ def test_known_classifier_answers_for_seen_payees():
     hybrid = HybridClassifier([], known=known)
     hybrid.fit([Example("rewe", category="A")])
     assert hybrid.predict(Example("rewe"), ["A", "B"]).category == "B"
+
+
+def test_known_classifier_abstaining_falls_back_to_exact_match():
+    class Abstains(Fixed):
+        def predict(self, example, categories):
+            return Prediction(None)
+
+    hybrid = HybridClassifier([], known=Abstains({"A": 1.0}))
+    hybrid.fit([Example("rewe", category="A")])
+    assert hybrid.predict(Example("rewe"), ["A", "B"]).category == "A"
+
+
+def test_single_class_char_ngram_fallback_answers():
+    from cleanab.classifier.baselines import CharNgramClassifier
+
+    hybrid = HybridClassifier([CharNgramClassifier()], "hybrid-lite")
+    hybrid.fit([Example("rewe", category="Food"), Example("edeka", category="Food")])
+    assert hybrid.predict(Example("lidl"), ["Food", "Subs"]).category == "Food"

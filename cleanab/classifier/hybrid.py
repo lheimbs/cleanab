@@ -30,7 +30,11 @@ class HybridClassifier:
     def predict(self, example: Example, categories: list[str]) -> Prediction:
         seen = self.exact.predict(example, categories)
         if seen.category is not None:
-            return self.known.predict(example, categories) if self.known else seen
+            if self.known:
+                known = self.known.predict(example, categories)
+                if known.category is not None:
+                    return known
+            return seen
         totals = dict.fromkeys(categories, 0.0)
         answered = 0
         for fallback in self.fallbacks:

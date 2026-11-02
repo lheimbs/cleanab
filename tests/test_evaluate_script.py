@@ -171,3 +171,26 @@ def test_online_refit_every_still_refits_on_new_payees(evaluate_script, capsys):
     evaluate_script.run_online(Counting, examples, ["Food", "Subs"], warmup=0, target=0.9, refit_every=4)
     assert fits == [1, 4, 8]  # first Edeka, first Netflix (also the 4th), then every 4th
     assert "repeat" in capsys.readouterr().out
+
+
+def test_missing_imported_payee_column_warns(evaluate_script, tmp_path, capsys):
+    csv_path = tmp_path / "t.csv"
+    write_csv(csv_path, [("2024-01-01", "A", "", "Cat")])
+    evaluate_script.load_examples(csv_path)
+    assert "no imported_payee column" in capsys.readouterr().err
+
+
+def test_online_treats_empty_payees_as_first_occurrences(evaluate_script, capsys):
+    from cleanab.classifier.base import Example
+
+    examples = [Example("VISA", category="Food", date=date(2024, 1, i + 1)) for i in range(4)]
+    evaluate_script.run_online(evaluate_script.ExactPayeeClassifier, examples, ["Food"], warmup=0, target=0.9)
+    assert "scored 4 transactions, 4 first occurrences" in capsys.readouterr().out
+
+
+def test_option_validation(evaluate_script):
+    import argparse
+
+    with pytest.raises(argparse.ArgumentTypeError):
+        evaluate_script.positive_int(2)("1")
+    assert evaluate_script.positive_int(1)("3") == 3

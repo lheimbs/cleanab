@@ -3,7 +3,7 @@
 CSV columns: date (YYYY-MM-DD), payee, purpose, category (optional: imported_payee, reconciled).
 See experiments/README.md.
 
-    uv run python -m experiments.evaluate data/transactions.csv --classifiers exact-payee,char-ngram-lr
+    uv run python -m experiments.evaluate experiments/data/transactions.csv --classifiers exact-payee,char-ngram-lr
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import sys
 import time
 from datetime import date
 from functools import cache
@@ -22,7 +23,9 @@ from cleanab.classifier.metrics import evaluate
 from cleanab.classifier.normalize import normalize_text
 
 
+@cache
 def _gliner() -> Classifier:
+    """One shared instance: GLiNER ignores history, so CV folds can reuse the loaded checkpoint."""
     from cleanab.classifier.gliner import GlinerClassifier
 
     return GlinerClassifier(descriptions=DESCRIPTIONS)
@@ -71,6 +74,16 @@ DEFAULT_CLASSIFIERS = "exact-payee,char-ngram-lr,hybrid-lite"
 PAYEE_COLUMNS = ("imported_payee", "payee")
 
 
+def positive_int(minimum: int):
+    def parse(value: str) -> int:
+        number = int(value)
+        if number < minimum:
+            raise argparse.ArgumentTypeError(f"must be at least {minimum}")
+        return number
+
+    return parse
+
+
 def parse_classifiers(value: str) -> list[str]:
     names = [name.strip() for name in value.split(",") if name.strip()]
     unknown = [name for name in names if name not in CLASSIFIERS]
@@ -102,7 +115,14 @@ def load_examples(
 ) -> list[Example]:
     """Load labeled rows, optionally only those within [since, until] or marked reconciled in Actual."""
     with path.open(newline="", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    if payee_column == "imported_payee" and "imported_payee" not in (reader.fieldnames or []):
+        print(
+            "warning: no imported_payee column, using Actual's current payee names (renames and merges leak "
+            "into the evaluation); re-export with experiments.export_actual",
+            file=sys.stderr,
+        )
     examples = [
         Example(
             payee=payee_of(row, payee_column),
@@ -246,7 +266,8 @@ def run_online(
         if index >= warmup:
             scored.append((example, classifier.predict(example, categories), payee not in seen))
         new = payee not in seen or example.category not in seen_categories
-        seen.add(payee)
+        if payee:  # payees that normalize to "" are unrelated, so each one counts as a first occurrence
+            seen.add(payee)
         seen_categories.add(example.category)
         if new or (index + 1) % refit_every == 0:
             classifier.fit(examples[: index + 1])
@@ -289,7 +310,7 @@ def main() -> None:
     parser.add_argument("--reconciled-only", action="store_true", help="only use transactions reconciled in Actual")
     parser.add_argument(
         "--group-cv",
-        type=int,
+        type=positive_int(2),
         metavar="K",
         help="instead of the chronological split, run K-fold cross-validation with payees held out",
     )
@@ -302,7 +323,7 @@ def main() -> None:
     parser.add_argument("--warmup", type=int, default=100, help="--online: transactions used only as initial history")
     parser.add_argument(
         "--refit-every",
-        type=int,
+        type=positive_int(1),
         default=1,
         metavar="N",
         help="--online: refit only every N transactions (and on new payees/categories); faster, slightly stale",

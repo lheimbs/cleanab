@@ -46,7 +46,15 @@ pick them with `--classifiers`.
 The data is split chronologically (default 80/20). Results are reported for all test
 transactions and separately for payees seen / not seen in training, since the unseen group
 is where a model has to earn its install cost. `cov@95%` is the share of transactions that
-could be auto-categorized while keeping 95% precision.
+could be auto-categorized while keeping 95% precision. The threshold behind it is picked on the same
+transactions it is scored on, so treat it (and the printed `thr`) as an upper bound, especially for small
+groups; pick a production threshold on earlier data.
+
+`char-ngram-lr` and `hybrid-lite` need scikit-learn (the `ml-lite` extra, also in the dev group).
+
+The category list comes from the whole dataset, so zero-shot models may be offered categories created
+after a transaction's date, and grouped CV trains on later transactions of other payees. Both are
+deliberate: they isolate the payee effect rather than replay history (use `--online` for that).
 
 ## Unseen-payee evaluation
 

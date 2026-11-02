@@ -24,18 +24,23 @@ def accuracy(predictions: list[Prediction], truths: list[str]) -> float:
 
 
 def ece(predictions: list[Prediction], truths: list[str], bins: int = 10) -> float:
-    answered = [(p, t) for p, t in zip(predictions, truths, strict=True) if p.category is not None]
+    # Clamp: float32 softmax outputs can land a hair outside [0, 1] and would otherwise fall into no bin.
+    answered = [
+        (min(max(p.confidence, 0.0), 1.0), p.category == t)
+        for p, t in zip(predictions, truths, strict=True)
+        if p.category is not None
+    ]
     if not answered:
         return 0.0
     total = len(answered)
     error = 0.0
     for b in range(bins):
         low, high = b / bins, (b + 1) / bins
-        bucket = [(p, t) for p, t in answered if low <= p.confidence < high or (b == bins - 1 and p.confidence == 1.0)]
+        bucket = [(c, hit) for c, hit in answered if low <= c < high or (b == bins - 1 and c == 1.0)]
         if not bucket:
             continue
-        confidence = sum(p.confidence for p, _ in bucket) / len(bucket)
-        hit_rate = sum(p.category == t for p, t in bucket) / len(bucket)
+        confidence = sum(c for c, _ in bucket) / len(bucket)
+        hit_rate = sum(hit for _, hit in bucket) / len(bucket)
         error += len(bucket) / total * abs(confidence - hit_rate)
     return error
 

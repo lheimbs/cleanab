@@ -21,6 +21,9 @@ from cleanab.classifier.normalize import model_text, normalize_text
         ("EREF+ABC123XYZ MREF+M-77 CRED+DE98ZZZ09999999999 SVWZ+Rechnung 2024", "rechnung"),
         ("Zahlung an DE89 3704 0044 0532 0130 00 Miete", "zahlung an miete"),
         ("Amzn Mktp De*AB12CD34", "ab12cd34"),
+        ("IBAN: DE89370400440532013000 BIC: COBADEFFXXX Miete", "cobadeffxxx miete"),
+        ("Bicycle Shop Berlin", "bicycle shop berlin"),
+        ("IBANEZ Guitars", "ibanez guitars"),
         ("", ""),
         (None, ""),
     ],
@@ -143,3 +146,13 @@ def test_evaluate_report():
     assert report.accuracy == 0.5
     assert report.coverage == 0.5
     assert report.coverage_at_precision == 0.5
+
+
+def test_char_ngram_single_class_reports_scores():
+    clf = CharNgramClassifier()
+    clf.fit([Example("rewe", category="Food"), Example("edeka", category="Food")])
+    assert clf.predict(Example("lidl"), ["Food", "Subs"]).scores == {"Food": 0.5}
+
+
+def test_ece_clamps_confidence_slightly_above_one():
+    assert ece([Prediction("a", 1.0000001)], ["b"]) == pytest.approx(1.0, abs=1e-6)

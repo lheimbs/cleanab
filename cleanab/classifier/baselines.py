@@ -50,8 +50,11 @@ class CharNgramClassifier:
         self._model = None
 
     def fit(self, history: list[Example]) -> None:
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.linear_model import LogisticRegression
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.linear_model import LogisticRegression
+        except ImportError as exc:
+            raise RuntimeError("install scikit-learn: uv sync --extra ml-lite (or the dev group)") from exc
 
         labeled = [e for e in history if e.category]
         classes = {e.category for e in labeled}
@@ -67,7 +70,9 @@ class CharNgramClassifier:
     def predict(self, example: Example, categories: list[str]) -> Prediction:
         if self._model is None or self._vectorizer is None:
             only = getattr(self, "_only_class", None)
-            return Prediction(only if only in categories else None, 0.5 if only else 0.0)
+            if only not in categories:
+                return Prediction(None)
+            return Prediction(only, 0.5, {only: 0.5})
         features = self._vectorizer.transform([model_text(example.payee, example.purpose)])
         probabilities = self._model.predict_proba(features)[0]
         scores = {
