@@ -45,7 +45,7 @@ pick them with `--classifiers`.
 
 The data is split chronologically (default 80/20). Results are reported for all test
 transactions and separately for payees seen / not seen in training, since the unseen group
-is where a model has to earn its install cost. `cov@95%` is the share of transactions that
+is where a model has to earn its install cost. `cov@95.0%` is the share of transactions that
 could be auto-categorized while keeping 95% precision. The threshold behind it is picked on the same
 transactions it is scored on, so treat it (and the printed `thr`) as an upper bound, especially for small
 groups; pick a production threshold on earlier data.

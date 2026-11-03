@@ -137,8 +137,17 @@ def load_examples(
             "into the evaluation); re-export with experiments.export_actual",
             file=sys.stderr,
         )
+    # Filter first, so the note below only counts rows that are actually evaluated.
+    rows = [
+        row
+        for row in rows
+        if row.get("category")
+        and (since is None or date.fromisoformat(row["date"]) >= since)
+        and (until is None or date.fromisoformat(row["date"]) <= until)
+        and (not reconciled_only or row.get("reconciled") == "1")
+    ]
     if payee_column == "imported_payee" and "imported_payee" in (reader.fieldnames or []):
-        fallbacks = sum(1 for row in rows if row.get("category") and not row.get("imported_payee"))
+        fallbacks = sum(1 for row in rows if not row.get("imported_payee"))
         if fallbacks:
             print(
                 f"note: {fallbacks} labeled rows have no imported_payee and use Actual's current payee name",
@@ -148,14 +157,10 @@ def load_examples(
         Example(
             payee=payee_of(row, payee_column),
             purpose=row.get("purpose", ""),
-            category=row["category"] or None,
+            category=row["category"],
             date=date.fromisoformat(row["date"]),
         )
         for row in rows
-        if row.get("category")
-        and (since is None or date.fromisoformat(row["date"]) >= since)
-        and (until is None or date.fromisoformat(row["date"]) <= until)
-        and (not reconciled_only or row.get("reconciled") == "1")
     ]
     return sorted(examples, key=lambda e: e.date)
 
@@ -185,7 +190,7 @@ def print_report(name: str, label: str, predictions, truths, target: float) -> N
     threshold = f"{report.threshold:.2f}" if report.threshold is not None else "-"
     print(
         f"{name:16} {label:13} n={report.n:5} acc={report.accuracy:.3f} "
-        f"answered={report.coverage:.3f} cov@{target:.0%}={report.coverage_at_precision:.3f} "
+        f"answered={report.coverage:.3f} cov@{target:.1%}={report.coverage_at_precision:.3f} "
         f"(thr {threshold}) ece={report.ece:.3f}"
     )
 
@@ -197,7 +202,7 @@ def show_errors(name: str, test: list[Example], predictions, limit: int) -> None
     print(f"{name}: {len(errors)} errors, showing {min(limit, len(errors))}")
     for example, prediction in errors[:limit]:
         print(
-            f"  {prediction.confidence:.2f} {normalize_text(example.payee)[:40]:40} "
+            f"  {prediction.confidence:.2f} {payee_key(example)[:40]:40} "
             f"true={example.category} pred={prediction.category}"
         )
 
@@ -394,9 +399,21 @@ def main() -> None:
         descriptions = yaml.safe_load(args.descriptions.read_text(encoding="utf-8")) or {}
         if not isinstance(descriptions, dict):
             parser.error("--descriptions must map category names to descriptions")
-        DESCRIPTIONS.update({str(k): str(v) for k, v in descriptions.items()})
+        # YAML 1.1 turns unquoted keys such as No/Yes/On into booleans; empty values would become "None".
+        loaded_descriptions = {
+            str(k): str(v).strip() for k, v in descriptions.items() if v is not None and str(v).strip()
+        }
     examples = load_examples(args.data, args.since, args.until, args.reconciled_only, args.payee_column)
     categories = sorted({e.category for e in examples})
+    if args.descriptions:
+        unknown = sorted(set(loaded_descriptions) - set(categories))
+        if unknown:
+            print(
+                f"warning: descriptions for unknown categories (typo, or a key like No/Yes that needs quotes): "
+                f"{', '.join(unknown)}",
+                file=sys.stderr,
+            )
+        DESCRIPTIONS.update(loaded_descriptions)
     if args.online:
         if warmup >= len(examples):
             parser.error(f"--warmup {warmup} leaves nothing to score ({len(examples)} labeled transactions)")

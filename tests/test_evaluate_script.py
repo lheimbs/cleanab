@@ -264,3 +264,27 @@ def test_conflicting_options_are_rejected(evaluate_script, tmp_path, monkeypatch
     with pytest.raises(SystemExit) as excinfo:
         evaluate_script.main()
     assert excinfo.value.code == 2
+
+
+def test_imported_payee_note_counts_only_filtered_rows(evaluate_script, tmp_path, capsys):
+    csv_path = tmp_path / "t.csv"
+    csv_path.write_text(
+        "date,payee,purpose,category,imported_payee\n2020-01-01,A,,Cat,\n2020-01-02,B,,Cat,\n2024-01-01,C,,Cat,C RAW\n",
+        encoding="utf-8",
+    )
+    assert len(evaluate_script.load_examples(csv_path, since=date(2024, 1, 1))) == 1
+    assert "have no imported_payee" not in capsys.readouterr().err
+
+
+def test_descriptions_skip_empty_values_and_warn_on_unknown_keys(evaluate_script, tmp_path, monkeypatch, capsys):
+    csv_path = tmp_path / "t.csv"
+    write_csv(csv_path, [("2024-01-01", "A", "", "Food"), ("2024-01-02", "B", "", "No")])
+    descriptions = tmp_path / "d.yaml"
+    descriptions.write_text("No: refunds\nFood:\n", encoding="utf-8")
+    monkeypatch.setattr(evaluate_script, "DESCRIPTIONS", {})
+    monkeypatch.setattr(
+        "sys.argv", ["evaluate.py", str(csv_path), "--classifiers", "exact-payee", "--descriptions", str(descriptions)]
+    )
+    evaluate_script.main()
+    assert "Food" not in evaluate_script.DESCRIPTIONS
+    assert "unknown categories" in capsys.readouterr().err and "False" in evaluate_script.DESCRIPTIONS
