@@ -36,6 +36,11 @@ from cleanab.classifier.normalize import model_text, normalize_text
         ("Bic GmbH", "bic gmbh"),
         ("VISA PAYPAL *SPOTIFY", "spotify"),
         ("Kartenzahlung SUMUP *BAECKEREI MUELLER", "baeckerei mueller"),
+        ("KD12 STADTWERKE MUENCHEN", "kd12 stadtwerke muenchen"),
+        ("TS12 HAMBURGERSTRASSE", "ts12 hamburgerstrasse"),
+        ("de89 3704 0044 0532 0130 00 Miete", "miete"),
+        ("Netflix.com.", "netflix.com"),
+        ("REWE SAGT DANKE.", "rewe sagt danke"),
         ("", ""),
         (None, ""),
     ],
@@ -168,3 +173,11 @@ def test_char_ngram_single_class_reports_scores():
 
 def test_ece_clamps_confidence_slightly_above_one():
     assert ece([Prediction("a", 1.0000001)], ["b"]) == pytest.approx(1.0, abs=1e-6)
+
+
+def test_char_ngram_skips_rows_without_text():
+    classifier = CharNgramClassifier()
+    classifier.fit([Example("Unnamed", "", "A"), Example("VISA", "", "B")])  # nothing left after normalizing
+    assert classifier.predict(Example("rewe"), ["A", "B"]).category is None
+    classifier.fit([Example("Unnamed", "", "A"), Example("rewe", "", "B"), Example("edeka", "", "A")])
+    assert classifier.predict(Example("rewe"), ["A", "B"]).category in {"A", "B"}

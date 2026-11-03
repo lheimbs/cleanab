@@ -56,7 +56,8 @@ class CharNgramClassifier:
         except ImportError as exc:
             raise RuntimeError("install scikit-learn: uv sync --extra ml-lite (or the dev group)") from exc
 
-        labeled = [e for e in history if e.category]
+        # Rows whose text normalizes to nothing (e.g. "Unnamed" without purpose) carry no n-grams.
+        labeled = [e for e in history if e.category and model_text(e.payee, e.purpose)]
         classes = {e.category for e in labeled}
         if len(classes) < 2:
             self._vectorizer = self._model = None

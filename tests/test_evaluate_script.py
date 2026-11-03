@@ -232,3 +232,35 @@ def test_online_offers_only_categories_seen_so_far(evaluate_script):
     ]
     evaluate_script.run_online(Recording, examples, ["Food", "Subs"], warmup=0, target=0.9)
     assert offered == [[], ["Food"], ["Food", "Subs"]]
+
+
+def test_payee_less_rows_are_keyed_by_purpose(evaluate_script, capsys):
+    from cleanab.classifier.base import Example
+
+    examples = [Example("Unnamed", "Kontofuehrungsentgelt", "Fees", date(2024, m, 1)) for m in range(1, 5)]
+    examples.append(Example("Unnamed", "", "Fees", date(2024, 5, 1)))
+    evaluate_script.run_online(evaluate_script.ExactPayeeClassifier, examples, ["Fees"], warmup=0, target=0.9)
+    output = capsys.readouterr().out
+    assert "scored 5 transactions, 2 first occurrences" in output  # the fee once, the empty row on its own
+    assert "(2 distinct first-occurrence payees)" in output
+    assert len(set(evaluate_script.group_folds(examples[:4], 5))) == 1
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--online", "--group-cv", "3"],
+        ["--warmup", "5"],
+        ["--refit-every", "5"],
+        ["--online", "--train-fraction", "0.5"],
+        ["--group-cv", "3", "--train-fraction", "0.5"],
+        ["--online", "--warmup", "10"],  # more than the data has
+    ],
+)
+def test_conflicting_options_are_rejected(evaluate_script, tmp_path, monkeypatch, extra):
+    csv_path = tmp_path / "t.csv"
+    write_csv(csv_path, [("2024-01-01", "A", "", "Cat"), ("2024-01-02", "B", "", "Other")])
+    monkeypatch.setattr("sys.argv", ["evaluate.py", str(csv_path), "--classifiers", "exact-payee", *extra])
+    with pytest.raises(SystemExit) as excinfo:
+        evaluate_script.main()
+    assert excinfo.value.code == 2

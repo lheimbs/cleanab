@@ -62,3 +62,18 @@ def test_single_class_char_ngram_fallback_answers():
     hybrid = HybridClassifier([CharNgramClassifier()], "hybrid-lite")
     hybrid.fit([Example("rewe", category="Food"), Example("edeka", category="Food")])
     assert hybrid.predict(Example("lidl"), ["Food", "Subs"]).category == "Food"
+
+
+def test_fallback_answers_are_cached_until_refit():
+    fallback = Fixed({"A": 0.9, "B": 0.1})
+    hybrid = HybridClassifier([fallback])
+    hybrid.fit([])
+    for _ in range(3):
+        hybrid.predict(Example("new", "abo"), ["A", "B"])
+    assert fallback.calls == 1
+    hybrid.predict(Example("new", "other purpose"), ["A", "B"])
+    hybrid.predict(Example("new", "abo"), ["A"])
+    assert fallback.calls == 3
+    hybrid.fit([])
+    hybrid.predict(Example("new", "abo"), ["A", "B"])
+    assert fallback.calls == 4

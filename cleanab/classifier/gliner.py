@@ -70,6 +70,9 @@ class GlinerClassifier:
         return f"{category}: {description}" if description else category
 
     def predict(self, example: Example, categories: list[str]) -> Prediction:
+        # Nothing to decide between: an empty list crashes gliner2, and one label always gets confidence 1.0.
+        if len(categories) < 2:
+            return Prediction(None)
         by_text = {self._label_text(c): c for c in categories}
         result = self._load().classify_text(
             model_text(example.payee, example.purpose), {"category": list(by_text)}, include_confidence=True

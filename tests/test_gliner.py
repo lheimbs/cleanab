@@ -24,3 +24,14 @@ def test_predict_maps_descriptions_back():
     classifier = GlinerClassifier(descriptions={"Bills": "insurance"})
     classifier._extractor = Fake()
     assert classifier.predict(Example("hkk"), LABELS).category == "Bills"
+
+
+def test_fewer_than_two_categories_abstains_without_calling_the_model():
+    class Exploding:
+        def classify_text(self, *args, **kwargs):
+            raise AssertionError("must not be called")
+
+    classifier = GlinerClassifier()
+    classifier._extractor = Exploding()
+    assert classifier.predict(Example("rewe"), []).category is None
+    assert classifier.predict(Example("rewe"), ["Food"]).category is None

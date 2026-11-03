@@ -160,6 +160,20 @@ def load_examples(
     return sorted(examples, key=lambda e: e.date)
 
 
+def payee_key(example: Example) -> str:
+    """What counts as "the same payee" for seen/unseen splits and folds.
+
+    Transactions without a usable payee (e.g. cleanab's "Unnamed" for fees and interest) recur with the same
+    purpose text, which the text models read; keying them by purpose keeps a monthly fee from counting as a
+    new payee every month. Returns "" if neither says anything; such rows are unrelated to each other.
+    """
+    payee = normalize_text(example.payee)
+    if payee:
+        return payee
+    purpose = normalize_text(example.purpose)
+    return f"purpose: {purpose}" if purpose else ""
+
+
 def time_split(examples: list[Example], train_fraction: float) -> tuple[list[Example], list[Example]]:
     """Chronological split: a random split leaks recurring payees and inflates accuracy."""
     cut = int(len(examples) * train_fraction)
@@ -197,16 +211,16 @@ def run(
     errors: int = 0,
 ):
     classifier.fit(train)
-    # An empty normalized payee says nothing about the payee, so never count it as seen.
-    seen_payees = {normalize_text(e.payee) for e in train} - {""}
+    # An empty key says nothing about the payee, so never count it as seen.
+    seen_payees = {payee_key(e) for e in train} - {""}
     started = time.perf_counter()
     predictions = [classifier.predict(e, categories) for e in test]
     elapsed = time.perf_counter() - started
 
     groups = {
         "all": [True] * len(test),
-        "seen payee": [normalize_text(e.payee) in seen_payees for e in test],
-        "unseen payee": [normalize_text(e.payee) not in seen_payees for e in test],
+        "seen payee": [payee_key(e) in seen_payees for e in test],
+        "unseen payee": [payee_key(e) not in seen_payees for e in test],
     }
     for label, mask in groups.items():
         idx = [i for i, keep in enumerate(mask) if keep]
@@ -222,7 +236,7 @@ def group_folds(examples: list[Example], folds: int) -> list[int]:
 
     def fold_of(index: int, example: Example) -> int:
         # Payees that normalize to "" are unrelated to each other; spread them instead of piling them in one fold.
-        key = normalize_text(example.payee) or f"\0{index}"
+        key = payee_key(example) or f"\0{index}"
         return int(hashlib.md5(key.encode()).hexdigest(), 16) % folds
 
     return [fold_of(i, e) for i, e in enumerate(examples)]
@@ -283,7 +297,7 @@ def run_online(
     scored: list[tuple[Example, object, bool]] = []
     started = time.perf_counter()
     for index, example in enumerate(examples):
-        payee = normalize_text(example.payee)
+        payee = payee_key(example)
         if index >= warmup:
             # Only categories that existed by then: a real import cannot offer one created months later.
             offered = [c for c in categories if c in seen_categories]
@@ -297,7 +311,7 @@ def run_online(
     elapsed = time.perf_counter() - started
 
     name = classifier.name
-    cold_keys = [normalize_text(e.payee) for e, _, cold in scored if cold]
+    cold_keys = [payee_key(e) for e, _, cold in scored if cold]
     distinct_cold = len(set(cold_keys) - {""}) + cold_keys.count("")  # empty keys are separate payees
     print(f"{name}: scored {len(scored)} transactions, {sum(c for _, _, c in scored)} first occurrences")
     for label, keep in (("all", lambda c: True), ("first occurr.", lambda c: c), ("repeat", lambda c: not c)):
@@ -328,29 +342,33 @@ def main() -> None:
         help="imported_payee (default) is what cleanab sees at import; payee is Actual's current, possibly "
         "renamed or merged payee and leaks later cleanup into the evaluation",
     )
-    parser.add_argument("--train-fraction", type=fraction, default=0.8, help="chronological split (0 < x < 1)")
+    parser.add_argument(
+        "--train-fraction",
+        type=fraction,
+        help="chronological split (0 < x < 1, default 0.8); not with --online/--group-cv",
+    )
     parser.add_argument("--since", type=date.fromisoformat, help="only use transactions from this date (YYYY-MM-DD)")
     parser.add_argument("--until", type=date.fromisoformat, help="only use transactions up to this date (YYYY-MM-DD)")
     parser.add_argument("--reconciled-only", action="store_true", help="only use transactions reconciled in Actual")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--group-cv",
         type=positive_int(2),
         metavar="K",
         help="instead of the chronological split, run K-fold cross-validation with payees held out",
     )
-    parser.add_argument(
+    mode.add_argument(
         "--online",
         action="store_true",
         help="replay in date order, predicting each transaction from earlier history only; "
         "reports first occurrences of a payee separately",
     )
     parser.add_argument(
-        "--warmup", type=positive_int(0), default=100, help="--online: transactions used only as initial history"
+        "--warmup", type=positive_int(0), help="--online: transactions used only as initial history (default 100)"
     )
     parser.add_argument(
         "--refit-every",
         type=positive_int(1),
-        default=1,
         metavar="N",
         help="--online: refit only every N transactions (and on new payees/categories); faster, slightly stale",
     )
@@ -362,6 +380,13 @@ def main() -> None:
     )
     parser.add_argument("--precision", type=precision, default=0.95, help="target precision for auto-assignment")
     args = parser.parse_args()
+    if not args.online and (args.warmup is not None or args.refit_every is not None):
+        parser.error("--warmup and --refit-every only apply to --online")
+    if (args.online or args.group_cv) and args.train_fraction is not None:
+        parser.error("--train-fraction only applies to the chronological split")
+    warmup = 100 if args.warmup is None else args.warmup
+    refit_every = args.refit_every or 1
+    train_fraction = args.train_fraction or 0.8
 
     if args.descriptions:
         import yaml
@@ -373,13 +398,11 @@ def main() -> None:
     examples = load_examples(args.data, args.since, args.until, args.reconciled_only, args.payee_column)
     categories = sorted({e.category for e in examples})
     if args.online:
-        print(
-            f"{len(examples)} labeled transactions, {len(categories)} categories; online replay, warmup {args.warmup}"
-        )
+        if warmup >= len(examples):
+            parser.error(f"--warmup {warmup} leaves nothing to score ({len(examples)} labeled transactions)")
+        print(f"{len(examples)} labeled transactions, {len(categories)} categories; online replay, warmup {warmup}")
         for name in args.classifiers:
-            run_online(
-                CLASSIFIERS[name], examples, categories, args.warmup, args.precision, args.errors, args.refit_every
-            )
+            run_online(CLASSIFIERS[name], examples, categories, warmup, args.precision, args.errors, refit_every)
         return
     if args.group_cv:
         print(
@@ -389,7 +412,7 @@ def main() -> None:
             run_grouped_cv(CLASSIFIERS[name], examples, categories, args.group_cv, args.precision, args.errors)
         return
 
-    train, test = time_split(examples, args.train_fraction)
+    train, test = time_split(examples, train_fraction)
     print(f"{len(examples)} labeled transactions, {len(categories)} categories; train {len(train)} / test {len(test)}")
 
     for name in args.classifiers:
