@@ -90,7 +90,7 @@ apps:
       #   Food: groceries, drugstores, bakeries, cafes
 ```
 
-- Transactions already in Actual (same `imported_id`, looked up from the earliest fetched date on) get no category from
+- Transactions already in Actual (same `imported_id`, looked up from a week before the earliest fetched date on) get no category from
   cleanab, so existing categories are not overwritten.
   Actual may still match a new transaction to an uncategorized one you entered by hand (same amount, close date);
   that one then gets the suggested category, but a category that is already set is never replaced.

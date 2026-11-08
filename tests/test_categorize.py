@@ -104,8 +104,7 @@ def test_existing_transactions_outside_history_window_untouched(monkeypatch):
     app, fake = make_app(monkeypatch, txs, history_until=date(2023, 12, 31))
     (tx,) = app.prepare_transactions((new_tx("Grocer", imported_id="already", day="2024-05-01"),))
     assert "category" not in tx
-    history_params = [p for path, p in fake.calls if path.endswith("/transactions") and "until_date" in p]
-    assert history_params == [{"since_date": "2020-01-01", "until_date": "2023-12-31"}]
+    assert ("/accounts/acc/transactions", {"since_date": "2020-01-01"}) in fake.calls
 
 
 def test_history_respects_dates(monkeypatch):
@@ -385,7 +384,7 @@ def test_possible_match_with_manual_transfer_gets_no_category(monkeypatch):
     assert other_amount["category"] == "c-food"
 
 
-def test_category_groups_failure_only_warns(monkeypatch):
+def test_category_groups_failure_skips_categorization(monkeypatch):
     import requests
 
     app, fake = make_app(monkeypatch, HISTORY)
@@ -398,7 +397,7 @@ def test_category_groups_failure_only_warns(monkeypatch):
 
     monkeypatch.setattr(app, "_get", get)
     (tx,) = app.prepare_transactions((new_tx("Grocer"),))
-    assert tx["category"] == "c-food"
+    assert "category" not in tx  # hidden groups unknown: better no categories than hidden ones
 
 
 def test_full_model_does_not_retry_on_other_errors(monkeypatch):
@@ -424,3 +423,17 @@ def test_description_warnings_only_with_full(monkeypatch):
     app, _ = make_app(monkeypatch, HISTORY, model="full", descriptions={"Fod": "typo", "Food": "groceries"})
     app.prepare_transactions((new_tx("Grocer"),))
     assert any("unknown categories" in w and "Fod" in w for w in warnings)
+
+
+def test_transfer_payees_after_history_until_are_excluded(monkeypatch):
+    txs = [*HISTORY, {**history_tx(20, "p-grocer", None), "date": "2024-02-01", "transfer_id": "t"}]
+    app, _ = make_app(monkeypatch, txs, history_until=date(2023, 12, 31))
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert "category" not in tx
+
+
+def test_history_until_limits_learning(monkeypatch):
+    late = [{**history_tx(i, "p-grocer", "c-bills"), "date": f"2024-01-{i:02d}"} for i in range(1, 20)]
+    app, _ = make_app(monkeypatch, [*HISTORY, *late], history_until=date(2023, 12, 31))
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert tx["category"] == "c-food"

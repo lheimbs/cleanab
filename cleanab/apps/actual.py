@@ -114,12 +114,7 @@ class ActualApp(BaseApp):
 
     def _hidden_group_ids(self) -> set[str]:
         """Ids of hidden category groups: all categories in them count as hidden."""
-        try:
-            groups = self._get("/categorygroups")
-        except requests.RequestException:
-            logger.warning("Could not load category groups, only categories hidden themselves are skipped")
-            return set()
-        return {g["id"] for g in groups if g.get("hidden")}
+        return {g["id"] for g in self._get("/categorygroups") if g.get("hidden")}
 
     def _budget_account_ids(self) -> list[str]:
         """The configured accounts that are on budget; Actual does not use categories in off-budget accounts."""
@@ -136,14 +131,14 @@ class ActualApp(BaseApp):
     ) -> tuple[list[Example], set[str]]:
         """Return (categorized transactions in Actual oldest first as training examples, normalized transfer payees).
 
-        Transfers are not learned from; their payees are returned so they are never assigned a category, since
-        Actual could match the import to a transfer entered by hand and fill in its category.
+        Transfers are not learned from; their payees (from `since` up to today, ignoring `until`) are returned so they
+        are never assigned a category, since Actual could match the import to a transfer and fill in its category.
         """
         payees = {p["id"]: p["name"] for p in self._get("/payees")}
         history: list[Example] = []
         transfer_payees: set[str] = set()
         for account_id in account_ids:
-            for tx in self._transactions(account_id, since, until):
+            for tx in self._transactions(account_id, since):
                 # The bank's payee name, as sent by cleanab, so it matches new transactions even when the
                 # payee was renamed in Actual; manually entered transactions only have the Actual name.
                 payee = tx.get("imported_payee") or payees.get(tx.get("payee"), "") or ""
@@ -151,7 +146,7 @@ class ActualApp(BaseApp):
                     transfer_payees.add(normalize_text(payee))
                     continue
                 category = labels.get(tx.get("category")) if tx.get("category") else None
-                if not category or tx.get("subtransactions"):
+                if not category or tx.get("subtransactions") or (until and tx["date"] > until.isoformat()):
                     continue
                 history.append(
                     Example(
