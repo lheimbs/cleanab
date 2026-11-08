@@ -1,6 +1,8 @@
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
+import requests
 
 from cleanab.apps import actual
 
@@ -99,6 +101,13 @@ def test_existing_transactions_untouched(app):
     assert "category" not in tx
 
 
+def test_summary_explains_skips(app, monkeypatch):
+    messages = []
+    monkeypatch.setattr(actual.logger, "info", lambda msg, *a: messages.append(msg))
+    app.prepare_transactions((new_tx("Grocer", imported_id="already", day="2024-05-01"), new_tx("Totally New Shop")))
+    assert "Categories: 0 assigned, 1 only suggested; skipped 1 already in Actual" in messages
+
+
 def test_existing_transactions_outside_history_window_untouched(monkeypatch):
     txs = [*HISTORY, {"date": "2024-05-01", "payee": "p-grocer", "category": None, "imported_id": "already"}]
     app, fake = make_app(monkeypatch, txs, history_until=date(2023, 12, 31))
@@ -155,6 +164,26 @@ def test_failure_does_not_block_import(app, monkeypatch):
     assert "category" not in txs[0]
 
 
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (requests.ConnectionError("Name or service not known: secret-host.example"), "ConnectionError"),
+        (requests.Timeout("slow"), "Timeout"),
+        (requests.HTTPError("boom", response=SimpleNamespace(status_code=401)), "HTTP 401"),
+    ],
+)
+def test_unreachable_actual_logs_one_line_without_traceback(app, monkeypatch, error, expected):
+    errors, exceptions = [], []
+    monkeypatch.setattr(actual.logger, "error", lambda msg, *a: errors.append(msg))
+    monkeypatch.setattr(actual.logger, "exception", lambda *a, **k: exceptions.append(a))
+    monkeypatch.setattr(app, "_get", lambda *a, **k: (_ for _ in ()).throw(error))
+    txs = (new_tx("Grocer"),)
+    assert app.prepare_transactions(txs) == txs
+    assert errors == [f"Could not get the categories from Actual ({expected}), importing without categories"]
+    assert "secret-host" not in errors[0]
+    assert exceptions == []
+
+
 def test_get_builds_url_and_headers(monkeypatch):
     app = actual.App(
         actual.Config(
@@ -208,12 +237,19 @@ def test_misspelled_categorize_keys_are_rejected():
         {"min_confidence": 1.5},
         {"new_payee_min_confidence": -0.1},
         {"history_since": "2024-01-01", "history_until": "2023-01-01"},
-        {"enabled": True, "descriptions": {"Food": "groceries"}},  # only used by model: full
     ],
 )
 def test_invalid_settings_are_rejected(categorize):
     with pytest.raises(ValueError):
         actual.Config(**BASE, categorize=categorize)
+
+
+def test_descriptions_with_light_model_only_warn(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(actual.logger, "warning", lambda msg, *a: warnings.append(msg))
+    config = actual.Config(**BASE, categorize={"enabled": True, "descriptions": {"Food": "groceries"}})
+    assert config.categorize.model == "light"
+    assert any("descriptions are ignored" in w for w in warnings)
 
 
 def test_failure_halfway_assigns_nothing(app, monkeypatch):
