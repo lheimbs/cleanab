@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, mod
 
 from ..classifier.base import Example
 from ..classifier.factory import build_classifier
+from ..classifier.normalize import normalize_text
 from ..models import AccountConfig, FintsTransaction
 from .base import BaseApp, BaseAppConfig
 
@@ -16,7 +17,7 @@ REQUEST_TIMEOUT = 30
 
 
 class CategorizeConfig(BaseModel):
-    """Suggest categories for new transactions, learned from the ones you already categorized in Actual."""
+    """Suggest categories for new transactions, learned from the categorized ones in the configured Actual accounts."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -33,7 +34,7 @@ class CategorizeConfig(BaseModel):
     def _check(self):
         if self.history_until and self.history_until < self.history_since:
             raise ValueError("history_until must not be before history_since")
-        if self.descriptions and self.model != "full":
+        if self.enabled and self.descriptions and self.model != "full":
             raise ValueError("descriptions are only used by model: full")
         return self
 
@@ -129,26 +130,36 @@ class ActualApp(BaseApp):
 
     def _load_history(
         self, account_ids: list[str], labels: dict[str, str], since: date, until: date | None
-    ) -> list[Example]:
-        """Return the categorized transactions in Actual, oldest first, as training examples."""
+    ) -> tuple[list[Example], set[str]]:
+        """Return (categorized transactions in Actual oldest first as training examples, normalized transfer payees).
+
+        Transfers are not learned from; their payees are returned so they are never assigned a category, since
+        Actual could match the import to a transfer entered by hand and fill in its category.
+        """
         payees = {p["id"]: p["name"] for p in self._get("/payees")}
         history: list[Example] = []
+        transfer_payees: set[str] = set()
         for account_id in account_ids:
             for tx in self._transactions(account_id, since, until):
+                # The bank's payee name, as sent by cleanab, so it matches new transactions even when the
+                # payee was renamed in Actual; manually entered transactions only have the Actual name.
+                payee = tx.get("imported_payee") or payees.get(tx.get("payee"), "") or ""
+                if tx.get("transfer_id"):
+                    transfer_payees.add(normalize_text(payee))
+                    continue
                 category = labels.get(tx.get("category")) if tx.get("category") else None
-                if not category or tx.get("transfer_id") or tx.get("subtransactions"):
+                if not category or tx.get("subtransactions"):
                     continue
                 history.append(
                     Example(
-                        # The bank's payee name, as sent by cleanab, so it matches new transactions even when the
-                        # payee was renamed in Actual; manually entered transactions only have the Actual name.
-                        payee=tx.get("imported_payee") or payees.get(tx.get("payee"), "") or "",
+                        payee=payee,
                         purpose=tx.get("notes") or "",
                         category=category,
                         date=date.fromisoformat(tx["date"]),
                     )
                 )
-        return sorted(history, key=lambda e: e.date)
+        transfer_payees.discard("")
+        return sorted(history, key=lambda e: e.date), transfer_payees
 
     def _existing_imported_ids(self, account_ids: list[str], transactions: tuple) -> set[str]:
         """imported_ids already in Actual for the period of the incoming transactions, regardless of history dates."""
@@ -168,37 +179,50 @@ class ActualApp(BaseApp):
         if not settings.enabled:
             return transactions
         try:
-            return self._categorize(transactions)
+            try:
+                return self._categorize(transactions, settings.model)
+            except Exception:
+                if settings.model != "full":
+                    raise
+                # e.g. the `models` group is not installed or the model download failed: still use the light model.
+                logger.exception("The full model failed, using the light model instead")
+                return self._categorize(transactions, "light")
         except Exception:
             # Categories are a convenience: never block the import because of them.
             logger.exception("Categorization failed, importing without categories")
             return transactions
 
-    def _categorize(self, transactions: tuple) -> tuple:
+    def _categorize(self, transactions: tuple, model: str) -> tuple:
         settings = self.config.categorize
         account_ids = self._budget_account_ids()
         if not account_ids:
             return transactions
         labels, hidden = self._category_labels()
-        history = self._load_history(account_ids, labels, settings.history_since, settings.history_until)
+        history, transfer_payees = self._load_history(
+            account_ids, labels, settings.history_since, settings.history_until
+        )
         if not history:
             logger.warning("No categorized transactions found in Actual, skipping categorization")
             return transactions
-        existing = self._existing_imported_ids(account_ids, transactions)
-        category_ids = {label: cid for cid, label in labels.items()}
-        classifier = build_classifier(settings.model, settings.descriptions)
-        classifier.fit(history)
-        categories = sorted({e.category for e in history} - hidden)  # hidden categories are never offered
+        learned = {e.category for e in history}
+        categories = sorted(learned - hidden)  # hidden categories are never offered
         if not categories:
             logger.warning("Only hidden categories in the history, skipping categorization")
             return transactions
 
-        unknown = sorted(set(settings.descriptions) - set(labels.values()))
-        if unknown:
-            logger.warning(f"Descriptions for unknown categories are ignored: {', '.join(unknown)}")
-        unused = sorted(set(settings.descriptions) & set(labels.values()) - set(categories))
-        if unused:
-            logger.warning(f"Categories without categorized transactions cannot be suggested: {', '.join(unused)}")
+        if model == "full":
+            described = set(settings.descriptions)
+            if unknown := sorted(described - set(labels.values())):
+                logger.warning(f"Descriptions for unknown categories are ignored: {', '.join(unknown)}")
+            if unhidden := sorted(described & hidden):
+                logger.warning(f"Hidden categories are never suggested: {', '.join(unhidden)}")
+            if unused := sorted((described & set(labels.values())) - learned - hidden):
+                logger.warning(f"Categories without categorized transactions cannot be suggested: {', '.join(unused)}")
+
+        existing = self._existing_imported_ids(account_ids, transactions)
+        category_ids = {label: cid for cid, label in labels.items()}
+        classifier = build_classifier(model, settings.descriptions)
+        classifier.fit(history)
 
         # Decide everything first and apply at the end, so a failure halfway leaves no transaction categorized.
         assignments: list[tuple[dict, str]] = []
@@ -213,6 +237,8 @@ class ActualApp(BaseApp):
             prediction = classifier.predict(example, categories)
             if prediction.category is None:
                 continue
+            if normalize_text(payee) in transfer_payees:
+                continue  # a transfer payee: Actual may match this to a transfer, which gets no category
             known = classifier.knows(example)
             if known:
                 # A payee seen before only gets a category it already had: if the model leans elsewhere (e.g. because
@@ -222,7 +248,7 @@ class ActualApp(BaseApp):
                     prediction = past
                 if prediction.category is None:
                     continue  # all its past categories are hidden
-                allowed = prediction.category is not None
+                allowed = True
                 threshold = settings.min_confidence
             else:
                 allowed = settings.assign_new_payees

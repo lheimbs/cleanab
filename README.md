@@ -70,7 +70,8 @@ font if a QR code is too large to fit on screen, or scan it from a distance.
 
 ## Category suggestions (Actual Budget, optional)
 
-cleanab can fill in the category of new transactions, learned from the ones you already categorized in Actual.
+cleanab can fill in the category of new transactions, learned from the ones you already categorized in the
+on-budget accounts listed in `actual_account_ids`.
 It is off by default. Enable it in the `actual` app section:
 
 ```yaml
@@ -98,7 +99,9 @@ apps:
   new payees only get a logged suggestion by default.
 - Actual rules that check "category is empty" no longer match transactions cleanab has given a category.
 - Off-budget accounts are left alone (nothing is learned from them or assigned to them), and hidden categories (or
-  categories in a hidden group) are never assigned. Transfers and split transactions are not learned from.
+  categories in a hidden group) are never assigned. Transfers and split transactions are not learned from, and payees
+  that appear in transfers never get a category.
+- With `model: full`, if the model cannot be loaded (not installed, download failed), the `light` model is used.
 - Unknown keys in the `actual` section are ignored with a warning; unknown keys under `categorize` are an error. Payees are matched on the bank's name, so renaming a payee in Actual does not hide its history.
 - Without `history_until`, categories cleanab assigned in earlier runs are learned from too, so a wrong guess you did
   not correct can repeat. Set `history_until` to the end of the period you have checked to avoid that.

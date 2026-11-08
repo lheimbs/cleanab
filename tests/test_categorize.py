@@ -209,7 +209,7 @@ def test_misspelled_categorize_keys_are_rejected():
         {"min_confidence": 1.5},
         {"new_payee_min_confidence": -0.1},
         {"history_since": "2024-01-01", "history_until": "2023-01-01"},
-        {"descriptions": {"Food": "groceries"}},  # only used by model: full
+        {"enabled": True, "descriptions": {"Food": "groceries"}},  # only used by model: full
     ],
 )
 def test_invalid_settings_are_rejected(categorize):
@@ -339,3 +339,28 @@ def test_stale_account_id_does_not_disable_the_others(monkeypatch):
 
 def test_empty_categorize_section_is_allowed():
     assert not actual.Config(**BASE, categorize=None).categorize.enabled
+
+
+def test_descriptions_may_stay_when_disabled():
+    assert not actual.Config(**BASE, categorize={"descriptions": {"Food": "groceries"}}).categorize.enabled
+
+
+def test_transfer_payees_never_get_a_category(monkeypatch):
+    txs = [*HISTORY, {**history_tx(20, "p-grocer", None), "transfer_id": "t"}]
+    app, _ = make_app(monkeypatch, txs, assign_new_payees=True, new_payee_min_confidence=0.0)
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert "category" not in tx
+
+
+def test_full_model_failure_falls_back_to_light(monkeypatch):
+    from cleanab.classifier import decider
+
+    def broken(self):
+        raise RuntimeError("install the model extra")
+
+    monkeypatch.setattr(decider.DeciderClassifier, "_load", broken)
+    app, _ = make_app(monkeypatch, HISTORY, model="full")
+    known, new = new_tx("Grocer", imported_id="a"), new_tx("Totally New Shop", imported_id="b")
+    app.prepare_transactions((known, new))
+    assert known["category"] == "c-food"
+    assert "category" not in new
