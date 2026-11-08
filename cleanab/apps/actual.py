@@ -148,6 +148,9 @@ class ActualApp(BaseApp):
         unknown = sorted(set(settings.descriptions) - set(labels.values()))
         if unknown:
             logger.warning(f"Descriptions for unknown categories are ignored: {', '.join(unknown)}")
+        unused = sorted(set(settings.descriptions) & set(labels.values()) - set(categories))
+        if unused:
+            logger.warning(f"Categories without categorized transactions cannot be suggested: {', '.join(unused)}")
 
         # Decide everything first and apply at the end, so a failure halfway leaves no transaction categorized.
         assignments: list[tuple[dict, str]] = []
