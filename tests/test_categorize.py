@@ -486,3 +486,12 @@ def test_hidden_duplicate_name_does_not_rename_visible_category(monkeypatch):
     assert labels["c-food"] == "Food"
     assert labels["c-old-food"] == "Food (c-old-food)"
     assert hidden == {"Food (c-old-food)"}
+
+
+def test_part_of_imported_split_blocks_matching_import(monkeypatch):
+    split = {"date": "2024-05-04", "payee": "p-x", "amount": -50, "category": None, "imported_id": "old"}
+    split["subtransactions"] = [{"amount": -30, "category": "c-food"}, {"amount": -20, "transfer_id": "t"}]
+    app, _ = make_app(monkeypatch, [*HISTORY, split])
+    tx = {**new_tx("Grocer"), "amount": -20}
+    app.prepare_transactions((tx,))
+    assert "category" not in tx

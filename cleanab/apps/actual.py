@@ -177,13 +177,15 @@ class ActualApp(BaseApp):
         manual: dict[tuple, list[date]] = {}
         for account_id in account_ids:
             for tx in self._transactions(account_id, since):
+                day = date.fromisoformat(tx["date"])
                 if tx.get("imported_id"):
                     imported_ids.add(tx["imported_id"])
                 elif tx.get("transfer_id") or tx.get("subtransactions") or tx.get("is_parent"):
-                    day = date.fromisoformat(tx["date"])
                     manual.setdefault((account_id, tx.get("amount")), []).append(day)
-                    # Actual may also match a single part of a split, e.g. a transfer inside it.
-                    for child in tx.get("subtransactions") or []:
+                # Actual may also match a single part of a split (also of an imported one: its parts have no
+                # imported_id), e.g. a transfer inside it.
+                for child in tx.get("subtransactions") or []:
+                    if not child.get("imported_id"):
                         manual.setdefault((account_id, child.get("amount")), []).append(day)
         return imported_ids, manual
 
