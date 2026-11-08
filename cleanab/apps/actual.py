@@ -39,7 +39,7 @@ class CategorizeConfig(BaseModel):
         if self.history_until and self.history_until < self.history_since:
             raise ValueError("history_until must not be before history_since")
         if self.enabled and self.descriptions and self.model != "full":
-            raise ValueError("descriptions are only used by model: full")
+            logger.warning("The descriptions are ignored with model: light, they are only used by model: full")
         return self
 
 

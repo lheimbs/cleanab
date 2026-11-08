@@ -215,12 +215,19 @@ def test_misspelled_categorize_keys_are_rejected():
         {"min_confidence": 1.5},
         {"new_payee_min_confidence": -0.1},
         {"history_since": "2024-01-01", "history_until": "2023-01-01"},
-        {"enabled": True, "descriptions": {"Food": "groceries"}},  # only used by model: full
     ],
 )
 def test_invalid_settings_are_rejected(categorize):
     with pytest.raises(ValueError):
         actual.Config(**BASE, categorize=categorize)
+
+
+def test_descriptions_with_light_model_only_warn(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(actual.logger, "warning", lambda msg, *a: warnings.append(msg))
+    config = actual.Config(**BASE, categorize={"enabled": True, "descriptions": {"Food": "groceries"}})
+    assert config.categorize.model == "light"
+    assert any("descriptions are ignored" in w for w in warnings)
 
 
 def test_failure_halfway_assigns_nothing(app, monkeypatch):
