@@ -21,6 +21,8 @@ apps:
   #   actual_api_key
   #   actual_sync_id
   #   actual_account_ids  # list of Actual account ids
+  #   categorize:         # optional category suggestions, see README
+  #     enabled: true
 
 accounts:
   - friendly_name: This Bank Account

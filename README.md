@@ -68,6 +68,55 @@ when `COLORTERM=truecolor` is set, otherwise 256 colors (16 on e.g. the Linux co
 for exact colors in colored photoTANs add `SendEnv COLORTERM` to your SSH config and `AcceptEnv COLORTERM` on the server. Zoom out the terminal
 font if a QR code is too large to fit on screen, or scan it from a distance.
 
+## Category suggestions (Actual Budget, optional)
+
+cleanab can fill in the category of new transactions, learned from the ones you already categorized in the
+on-budget accounts listed in `actual_account_ids`.
+It is off by default. Enable it in the `actual` app section:
+
+```yaml
+apps:
+  actual:
+    # ...
+    categorize:
+      enabled: true
+      model: light            # light: payee history + char n-grams; full: also a local zero-shot model
+      history_since: 2022-01-01   # only learn from the period you have verified (default: 2020-01-01)
+      history_until: 2022-12-31   # optional; default: up to today
+      min_confidence: 0.5     # known payees are assigned at or above this (0..1)
+      assign_new_payees: false    # new payees are only logged as suggestions unless this is true
+      new_payee_min_confidence: 0.8   # threshold for new payees, only used with assign_new_payees: true
+      # descriptions:         # optional, only with `model: full`; keyed by category name ("Name (id)" if two share a name)
+      #   Food: groceries, drugstores, bakeries, cafes
+```
+
+- Transactions already in Actual (same `imported_id`, looked up from a week before the earliest fetched date on) get
+  no category from cleanab, and a category that is already set is never replaced by Actual's import either.
+  Actual may still match a new transaction to an uncategorized one you entered by hand (same amount, close date);
+  that one then gets the suggested category, but a category that is already set is never replaced.
+- Payees seen before are assigned one of the categories they had before, picked using the payee name and purpose
+  text (their most common one if the model would pick something else or is less sure), when the confidence reaches `min_confidence`;
+  new payees only get a logged suggestion by default.
+- Actual rules that check "category is empty" no longer match transactions cleanab has given a category.
+- Off-budget accounts are left alone (nothing is learned from them or assigned to them), and hidden categories (or
+  categories in a hidden group) are never assigned. Transfers and split transactions are not learned from. Payees that
+  appear in transfers since `history_since` (also transfers to off-budget accounts), and transactions Actual could match to a transfer or split you entered by hand (same amount,
+  up to 7 days apart), never get a category.
+- Transactions without a payee name are never treated as a known payee.
+- With `model: full`, if the model cannot be loaded (not installed, download failed), the `light` model is used.
+- Payees are matched on the bank's name, so renaming a payee in Actual does not hide its history.
+- Unknown keys in the `actual` section are ignored with a warning; unknown keys under `categorize` are an error.
+- Without `history_until`, categories cleanab assigned in earlier runs are learned from too, so a wrong guess you did
+  not correct can repeat. Set `history_until` to the end of the period you have checked to avoid that.
+- Categorizing reads from Actual (categories, payees, recent transactions) also with `--dry-run` and `--test`; it
+  never writes there in those modes.
+- Try it with `--dry-run`: the log shows `Category …` and `Suggested category …` lines; with `--verbose` the
+  intermediary with the category ids is logged too.
+- `light` needs `uv sync --extra ml-lite`. `full` needs `uv sync --extra ml-lite --group models` and downloads a
+  ~2.7 GB model on first use; the model runs locally, once per distinct new payee and purpose text in each run.
+- On one user's checked history, `light` got about 92% right overall and `full` about 94%
+  (75% on never-seen payees, against 59% for `light`). See [experiments/README.md](experiments/README.md).
+
 ## Security note
 
 `config.yaml` contains your FinTS credentials in plaintext. Keep it out of version control (it is gitignored) and restrict its file permissions.

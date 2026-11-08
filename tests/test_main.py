@@ -162,3 +162,14 @@ def test_setup_does_not_probe_the_terminal(make_cleanab, monkeypatch):
     monkeypatch.setenv("KITTY_WINDOW_ID", "1")
     monkeypatch.delenv("CLEANAB_TAN_DISPLAY", raising=False)
     assert make_cleanab().tan_display == "auto"
+
+
+def test_prepare_transactions_runs_for_dry_run_and_import(make_cleanab, fints, monkeypatch):
+    seen = []
+    prepared = ("prepared",)
+    monkeypatch.setattr(FakeApp, "prepare_transactions", lambda self, txs: seen.append(len(txs)) or prepared)
+    make_cleanab(apps=1, dry_run=True).run()
+    cleanab = make_cleanab(apps=1)
+    cleanab.run()
+    assert seen == [2, 2]
+    assert cleanab.config.get_apps()[0].created == [prepared]

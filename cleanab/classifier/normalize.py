@@ -30,8 +30,9 @@ _AMAZON = re.compile(
     r"^(?:amzn mktp de|amazon\.de|amz)(?:\s*\*\s*\S+)?(?:\s+(?:amazon\.de|amzn\.com/bill|amzn mktp de))*\b",
     re.IGNORECASE,
 )
-# cleanab imports transactions without an applicant as "Unnamed"; that is no payee, so it must not group them.
-_PLACEHOLDER_PAYEES = {"unnamed"}
+# cleanab imports transactions without an applicant as "Unknown" (older versions: "Unnamed"); that is no payee,
+# so it must not group them.
+_PLACEHOLDER_PAYEES = {"unnamed", "unknown"}
 # Fold umlauts so "Bäckerei Müller" and the transliterated "BAECKEREI MUELLER" share a key.
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss"})
 _PAYPAL_PP = re.compile(r"^pp\.\d+\.pp\s*\.\s*", re.IGNORECASE)

@@ -31,6 +31,14 @@ class HybridClassifier:
         for fallback in self.fallbacks:
             fallback.fit(history)
 
+    def knows(self, example: Example) -> bool:
+        """True if the history contains this payee."""
+        return self.exact.knows(example)
+
+    def history_prediction(self, example: Example, categories: list[str]) -> Prediction:
+        """The payee's majority category in the history (scores: all its past categories); empty for a new payee."""
+        return self.exact.predict(example, categories)
+
     def predict(self, example: Example, categories: list[str]) -> Prediction:
         seen = self.exact.predict(example, categories)
         if seen.category is not None:
