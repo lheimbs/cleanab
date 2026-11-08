@@ -204,3 +204,33 @@ def test_misplaced_or_misspelled_keys_are_rejected():
 def test_invalid_settings_are_rejected(categorize):
     with pytest.raises(ValueError):
         actual.Config(**BASE, categorize=categorize)
+
+
+def test_failure_halfway_assigns_nothing(app, monkeypatch):
+    from cleanab.classifier.hybrid import HybridClassifier
+
+    original = HybridClassifier.predict
+
+    def predict(self, example, categories):
+        if example.payee == "Boom":
+            raise RuntimeError("model missing")
+        return original(self, example, categories)
+
+    monkeypatch.setattr(HybridClassifier, "predict", predict)
+    txs = (new_tx("Grocer", imported_id="a"), new_tx("Boom", imported_id="b"))
+    app.prepare_transactions(txs)
+    assert all("category" not in tx for tx in txs)
+
+
+def test_transfers_splits_and_deleted_categories_are_not_learned(monkeypatch):
+    txs = [
+        *HISTORY,
+        *({**history_tx(i, "p-other", "c-food"), "transfer_id": "t"} for i in range(11, 16)),
+        *({**history_tx(i, "p-other", "c-food"), "subtransactions": [{}]} for i in range(16, 21)),
+        *(history_tx(i, "p-other", "c-deleted") for i in range(21, 26)),
+    ]
+    app, _ = make_app(monkeypatch, txs, assign_new_payees=False)
+    payees = [*PAYEES, {"id": "p-other", "name": "Other"}]
+    app._get.data["/payees"] = payees
+    (tx,) = app.prepare_transactions((new_tx("Other"),))
+    assert "category" not in tx  # "Other" is unknown: only learned from skipped rows

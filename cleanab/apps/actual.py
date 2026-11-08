@@ -145,7 +145,13 @@ class ActualApp(BaseApp):
         classifier.fit(history)
         categories = sorted({e.category for e in history})
 
-        assigned = suggested = 0
+        unknown = sorted(set(settings.descriptions) - set(labels.values()))
+        if unknown:
+            logger.warning(f"Descriptions for unknown categories are ignored: {', '.join(unknown)}")
+
+        # Decide everything first and apply at the end, so a failure halfway leaves no transaction categorized.
+        assignments: list[tuple[dict, str]] = []
+        suggested = 0
         for transaction in transactions:
             if transaction.get("imported_id") in existing:
                 continue  # already in Actual: never touch what is there
@@ -156,16 +162,17 @@ class ActualApp(BaseApp):
                 continue
             known = classifier.knows(example)
             threshold = settings.min_confidence if known else settings.new_payee_min_confidence
-            if known or settings.assign_new_payees:
-                if prediction.confidence >= threshold:
-                    transaction["category"] = category_ids[prediction.category]
-                    assigned += 1
-                    logger.info(f"Category {prediction.category} ({prediction.confidence:.2f}): {example.payee}")
-                    continue
+            if (known or settings.assign_new_payees) and prediction.confidence >= threshold:
+                assignments.append((transaction, category_ids[prediction.category]))
+                logger.info(f"Category {prediction.category} ({prediction.confidence:.2f}): {example.payee}")
+                continue
             suggested += 1
             logger.info(
                 f"Suggested category {prediction.category} ({prediction.confidence:.2f}), not assigned: {example.payee}"
             )
+        for transaction, category_id in assignments:
+            transaction["category"] = category_id
+        assigned = len(assignments)
         logger.info(f"Categories: {assigned} assigned, {suggested} only suggested")
         return transactions
 
