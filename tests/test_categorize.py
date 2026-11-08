@@ -24,7 +24,11 @@ class FakeActual:
 
     def __init__(self, transactions, categories=CATEGORIES, payees=PAYEES):
         self.transactions = transactions
-        self.data = {"/categories": categories, "/payees": payees}
+        self.data = {
+            "/categories": categories,
+            "/payees": payees,
+            "/accounts": [{"id": "acc", "offbudget": False}, {"id": "savings", "offbudget": True}],
+        }
         self.calls = []
 
     def __call__(self, path, **params):
@@ -42,7 +46,7 @@ def make_app(monkeypatch, transactions, **categorize):
             actual_api_url="http://actual.local/",
             actual_api_key="k",
             actual_sync_id="s",
-            actual_account_ids=["acc"],
+            actual_account_ids=["acc", "savings"],
             categorize={"enabled": True, **categorize},
         )
     )
@@ -185,9 +189,15 @@ def test_get_builds_url_and_headers(monkeypatch):
 BASE = {"actual_api_url": "http://a/", "actual_api_key": "k", "actual_sync_id": "s", "actual_account_ids": ["a"]}
 
 
-def test_misplaced_or_misspelled_keys_are_rejected():
-    with pytest.raises(ValueError):
-        actual.Config(**BASE, categorise={"enabled": True})
+def test_unknown_top_level_keys_only_warn(monkeypatch):
+    warnings = []
+    monkeypatch.setattr(actual.logger, "warning", warnings.append)
+    config = actual.Config(**BASE, categorise={"enabled": True})
+    assert not config.categorize.enabled
+    assert any("categorise" in w for w in warnings)
+
+
+def test_misspelled_categorize_keys_are_rejected():
     with pytest.raises(ValueError):
         actual.Config(**BASE, categorize={"enable": True})
 
@@ -266,3 +276,32 @@ def test_category_reaches_the_import_request(app, monkeypatch):
     monkeypatch.setattr(actual.requests, "post", fake_post)
     app.create_transactions([tx])
     assert sent["transactions"][0]["category"] == "c-food"
+
+
+def test_off_budget_accounts_get_no_categories_and_are_not_learned(monkeypatch):
+    # The off-budget account's history says "Grocer" is Bills; it must neither be learned nor assigned there.
+    txs = [*HISTORY]
+    app, fake = make_app(monkeypatch, txs)
+    savings = [history_tx(i, "p-grocer", "c-bills") for i in range(20, 30)]
+    original = fake.__call__
+
+    def get(path, **params):
+        if path == "/accounts/savings/transactions":
+            return savings
+        return original(path, **params)
+
+    monkeypatch.setattr(app, "_get", get)
+    on_budget, off_budget = (
+        new_tx("Grocer", imported_id="a"),
+        {**new_tx("Grocer", imported_id="b"), "_account_id": "savings"},
+    )
+    app.prepare_transactions((on_budget, off_budget))
+    assert on_budget["category"] == "c-food"
+    assert "category" not in off_budget
+
+
+def test_hidden_categories_are_never_assigned(monkeypatch):
+    app, fake = make_app(monkeypatch, HISTORY)
+    fake.data["/categories"] = [{"id": "c-food", "name": "Food", "hidden": True}, {"id": "c-bills", "name": "Bills"}]
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert tx.get("category") != "c-food"

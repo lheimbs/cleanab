@@ -39,7 +39,17 @@ class CategorizeConfig(BaseModel):
 
 
 class ActualAppConfig(BaseAppConfig):
-    model_config = ConfigDict(extra="forbid")
+    # Unknown keys only warn, so configs with stray keys keep working; `categorize` itself is strict.
+    model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _warn_unknown_keys(cls, data):
+        if isinstance(data, dict):
+            unknown = sorted(set(data) - set(cls.model_fields))
+            if unknown:
+                logger.warning(f"Ignoring unknown keys in the Actual app config: {', '.join(unknown)}")
+        return data
 
     actual_api_url: HttpUrl
     actual_api_key: str
@@ -79,19 +89,34 @@ class ActualApp(BaseApp):
             params["until_date"] = until.isoformat()
         return self._get(f"/accounts/{account_id}/transactions", **params)
 
-    def _category_labels(self) -> dict[str, str]:
-        """Return category id -> label. Names shared by several categories (in different groups) get the id appended."""
+    def _category_labels(self) -> tuple[dict[str, str], set[str]]:
+        """Return (category id -> label, labels of hidden categories).
+
+        Names shared by several categories (in different groups) get the id appended.
+        """
         category_list = self._get("/categories")
         counts: dict[str, int] = {}
         for c in category_list:
             counts[c["name"]] = counts.get(c["name"], 0) + 1
-        return {c["id"]: c["name"] if counts[c["name"]] == 1 else f"{c['name']} ({c['id']})" for c in category_list}
+        labels = {c["id"]: c["name"] if counts[c["name"]] == 1 else f"{c['name']} ({c['id']})" for c in category_list}
+        hidden = {labels[c["id"]] for c in category_list if c.get("hidden")}
+        return labels, hidden
 
-    def _load_history(self, labels: dict[str, str], since: date, until: date | None) -> list[Example]:
+    def _budget_account_ids(self) -> list[str]:
+        """The configured accounts that are on budget; Actual does not use categories in off-budget accounts."""
+        offbudget = {a["id"] for a in self._get("/accounts") if a.get("offbudget")}
+        skipped = [a for a in self.config.actual_account_ids if a in offbudget]
+        if skipped:
+            logger.info(f"Not categorizing off-budget accounts: {', '.join(skipped)}")
+        return [a for a in self.config.actual_account_ids if a not in offbudget]
+
+    def _load_history(
+        self, account_ids: list[str], labels: dict[str, str], since: date, until: date | None
+    ) -> list[Example]:
         """Return the categorized transactions in Actual, oldest first, as training examples."""
         payees = {p["id"]: p["name"] for p in self._get("/payees")}
         history: list[Example] = []
-        for account_id in self.config.actual_account_ids:
+        for account_id in account_ids:
             for tx in self._transactions(account_id, since, until):
                 category = labels.get(tx.get("category")) if tx.get("category") else None
                 if not category or tx.get("transfer_id") or tx.get("subtransactions"):
@@ -108,7 +133,7 @@ class ActualApp(BaseApp):
                 )
         return sorted(history, key=lambda e: e.date)
 
-    def _existing_imported_ids(self, transactions: tuple) -> set[str]:
+    def _existing_imported_ids(self, account_ids: list[str], transactions: tuple) -> set[str]:
         """imported_ids already in Actual for the period of the incoming transactions, regardless of history dates."""
         dates = [date.fromisoformat(t["date"]) for t in transactions if t.get("date")]
         if not dates:
@@ -116,7 +141,7 @@ class ActualApp(BaseApp):
         since = min(dates)
         return {
             tx["imported_id"]
-            for account_id in self.config.actual_account_ids
+            for account_id in account_ids
             for tx in self._transactions(account_id, since)
             if tx.get("imported_id")
         }
@@ -134,16 +159,22 @@ class ActualApp(BaseApp):
 
     def _categorize(self, transactions: tuple) -> tuple:
         settings = self.config.categorize
-        labels = self._category_labels()
-        history = self._load_history(labels, settings.history_since, settings.history_until)
+        account_ids = self._budget_account_ids()
+        if not account_ids:
+            return transactions
+        labels, hidden = self._category_labels()
+        history = self._load_history(account_ids, labels, settings.history_since, settings.history_until)
         if not history:
             logger.warning("No categorized transactions found in Actual, skipping categorization")
             return transactions
-        existing = self._existing_imported_ids(transactions)
+        existing = self._existing_imported_ids(account_ids, transactions)
         category_ids = {label: cid for cid, label in labels.items()}
         classifier = build_classifier(settings.model, settings.descriptions)
         classifier.fit(history)
-        categories = sorted({e.category for e in history})
+        categories = sorted({e.category for e in history} - hidden)  # hidden categories are never offered
+        if not categories:
+            logger.warning("Only hidden categories in the history, skipping categorization")
+            return transactions
 
         unknown = sorted(set(settings.descriptions) - set(labels.values()))
         if unknown:
@@ -156,6 +187,8 @@ class ActualApp(BaseApp):
         assignments: list[tuple[dict, str]] = []
         suggested = 0
         for transaction in transactions:
+            if transaction.get("_account_id") not in account_ids:
+                continue  # off-budget (or unknown) account: no categories there
             if transaction.get("imported_id") in existing:
                 continue  # already in Actual: never touch what is there
             payee = transaction.get("imported_payee") or transaction["payee_name"]

@@ -96,7 +96,10 @@ apps:
 - Payees seen before are assigned one of the categories they had before, picked using the payee name and purpose
   text (their most common one if the model would pick something else), when the confidence reaches `min_confidence`;
   new payees only get a logged suggestion by default.
-- Actual rules that check "category is empty" no longer match transactions cleanab has given a category. Payees are matched on the bank's name, so renaming a payee in Actual does not hide its history.
+- Actual rules that check "category is empty" no longer match transactions cleanab has given a category.
+- Off-budget accounts are left alone (nothing is learned from them or assigned to them), and hidden categories are
+  never assigned.
+- Unknown keys in the `actual` section are ignored with a warning; unknown keys under `categorize` are an error. Payees are matched on the bank's name, so renaming a payee in Actual does not hide its history.
 - Without `history_until`, categories cleanab assigned in earlier runs are learned from too, so a wrong guess you did
   not correct can repeat. Set `history_until` to the end of the period you have checked to avoid that.
 - Try it with `--dry-run`: the log shows `Category …` and `Suggested category …` lines; with `--verbose` the
