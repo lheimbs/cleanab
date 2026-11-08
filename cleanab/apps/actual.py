@@ -92,11 +92,8 @@ class ActualApp(BaseApp):
         response.raise_for_status()
         return response.json()["data"]
 
-    def _transactions(self, account_id: str, since: date, until: date | None = None) -> list[dict]:
-        params = {"since_date": since.isoformat()}
-        if until:
-            params["until_date"] = until.isoformat()
-        return self._get(f"/accounts/{account_id}/transactions", **params)
+    def _transactions(self, account_id: str, since: date) -> list[dict]:
+        return self._get(f"/accounts/{account_id}/transactions", since_date=since.isoformat())
 
     def _category_labels(self) -> tuple[dict[str, str], set[str]]:
         """Return (category id -> label, labels of hidden categories).
@@ -229,6 +226,7 @@ class ActualApp(BaseApp):
 
         # Decide everything first and apply at the end, so a failure halfway leaves no transaction categorized.
         assignments: list[tuple[dict, str]] = []
+        messages: list[str] = []
         suggested = 0
         for transaction in transactions:
             if transaction.get("_account_id") not in account_ids:
@@ -249,9 +247,9 @@ class ActualApp(BaseApp):
             if prediction.category is None:
                 continue
             if past is not None:
-                # A payee seen before only gets a category it already had: if the model leans elsewhere (e.g. because
-                # of the purpose text), fall back to the payee's majority category.
-                if prediction.category not in (past.scores or {}):
+                # A payee seen before only gets a category it already had. If the model leans elsewhere (e.g. because
+                # of the purpose text), or is less sure than the payee's history, use the payee's majority category.
+                if prediction.category not in (past.scores or {}) or prediction.confidence < past.confidence:
                     prediction = past
                 allowed = True
                 threshold = settings.min_confidence
@@ -260,12 +258,15 @@ class ActualApp(BaseApp):
                 threshold = settings.new_payee_min_confidence
             if allowed and prediction.confidence >= threshold:
                 assignments.append((transaction, category_ids[prediction.category]))
-                logger.info(f"Category {prediction.category} ({prediction.confidence:.2f}): {example.payee}")
+                messages.append(f"Category {prediction.category} ({prediction.confidence:.2f}): {example.payee}")
                 continue
             suggested += 1
-            logger.info(
+            messages.append(
                 f"Suggested category {prediction.category} ({prediction.confidence:.2f}), not assigned: {example.payee}"
             )
+        # Logged only now, so a run that fails halfway (and is retried with the light model) logs nothing.
+        for message in messages:
+            logger.info(message)
         for transaction, category_id in assignments:
             transaction["category"] = category_id
         assigned = len(assignments)

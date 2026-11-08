@@ -90,17 +90,17 @@ apps:
       #   Food: groceries, drugstores, bakeries, cafes
 ```
 
-- Transactions already in Actual (same `imported_id`, looked up from a week before the earliest fetched date on) get no category from
-  cleanab, so existing categories are not overwritten.
+- Transactions already in Actual (same `imported_id`, looked up from a week before the earliest fetched date on) get
+  no category from cleanab, and a category that is already set is never replaced by Actual's import either.
   Actual may still match a new transaction to an uncategorized one you entered by hand (same amount, close date);
   that one then gets the suggested category, but a category that is already set is never replaced.
 - Payees seen before are assigned one of the categories they had before, picked using the payee name and purpose
-  text (their most common one if the model would pick something else), when the confidence reaches `min_confidence`;
+  text (their most common one if the model would pick something else or is less sure), when the confidence reaches `min_confidence`;
   new payees only get a logged suggestion by default.
 - Actual rules that check "category is empty" no longer match transactions cleanab has given a category.
 - Off-budget accounts are left alone (nothing is learned from them or assigned to them), and hidden categories (or
   categories in a hidden group) are never assigned. Transfers and split transactions are not learned from. Payees that
-  appear in transfers, and transactions Actual could match to a transfer or split you entered by hand (same amount,
+  appear in transfers since `history_since`, and transactions Actual could match to a transfer or split you entered by hand (same amount,
   up to 7 days apart), never get a category.
 - Transactions without a payee name are never treated as a known payee.
 - With `model: full`, if the model cannot be loaded (not installed, download failed), the `light` model is used.

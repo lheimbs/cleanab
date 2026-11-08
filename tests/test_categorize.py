@@ -437,3 +437,34 @@ def test_history_until_limits_learning(monkeypatch):
     app, _ = make_app(monkeypatch, [*HISTORY, *late], history_until=date(2023, 12, 31))
     (tx,) = app.prepare_transactions((new_tx("Grocer"),))
     assert tx["category"] == "c-food"
+
+
+@pytest.mark.parametrize(
+    ("manual_extra", "day", "blocked"),
+    [
+        ({"subtransactions": [{}]}, "2024-05-04", True),
+        ({"is_parent": True}, "2024-05-04", True),
+        ({"transfer_id": "t"}, "2024-05-11", True),  # 7 days after the manual one
+        ({"transfer_id": "t"}, "2024-05-12", False),  # 8 days: Actual would not match
+    ],
+)
+def test_manual_split_and_match_window(monkeypatch, manual_extra, day, blocked):
+    manual = {"date": "2024-05-04", "payee": "p-x", "amount": -500, "category": None, **manual_extra}
+    app, _ = make_app(monkeypatch, [*HISTORY, manual])
+    tx = {**new_tx("Grocer", day=day), "amount": -500}
+    app.prepare_transactions((tx,))
+    assert ("category" not in tx) is blocked
+
+
+def test_failed_full_run_logs_assignments_once(monkeypatch):
+    from cleanab.classifier import decider
+
+    def broken(self):
+        raise decider.ModelUnavailable("not installed")
+
+    monkeypatch.setattr(decider.DeciderClassifier, "_load", broken)
+    infos = []
+    monkeypatch.setattr(actual.logger, "info", infos.append)
+    app, _ = make_app(monkeypatch, HISTORY, model="full")
+    app.prepare_transactions((new_tx("Grocer", imported_id="a"), new_tx("Totally New Shop", imported_id="b")))
+    assert sum(line.startswith("Category Food") for line in infos) == 1
