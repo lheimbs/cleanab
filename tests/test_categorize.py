@@ -1,6 +1,8 @@
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
+import requests
 
 from cleanab.apps import actual
 
@@ -160,6 +162,26 @@ def test_failure_does_not_block_import(app, monkeypatch):
     txs = (new_tx("Grocer"),)
     assert app.prepare_transactions(txs) == txs
     assert "category" not in txs[0]
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (requests.ConnectionError("Name or service not known: secret-host.example"), "ConnectionError"),
+        (requests.Timeout("slow"), "Timeout"),
+        (requests.HTTPError("boom", response=SimpleNamespace(status_code=401)), "HTTP 401"),
+    ],
+)
+def test_unreachable_actual_logs_one_line_without_traceback(app, monkeypatch, error, expected):
+    errors, exceptions = [], []
+    monkeypatch.setattr(actual.logger, "error", lambda msg, *a: errors.append(msg))
+    monkeypatch.setattr(actual.logger, "exception", lambda *a, **k: exceptions.append(a))
+    monkeypatch.setattr(app, "_get", lambda *a, **k: (_ for _ in ()).throw(error))
+    txs = (new_tx("Grocer"),)
+    assert app.prepare_transactions(txs) == txs
+    assert errors == [f"Could not get the categories from Actual ({expected}), importing without categories"]
+    assert "secret-host" not in errors[0]
+    assert exceptions == []
 
 
 def test_get_builds_url_and_headers(monkeypatch):

@@ -200,6 +200,12 @@ class ActualApp(BaseApp):
                 # e.g. the `models` group is not installed or the model download failed: still use the light model.
                 logger.warning(f"The full model is unavailable ({exc}), using the light model instead")
                 return self._categorize(transactions, "light")
+        except requests.RequestException as exc:
+            # A connection problem needs one line, not a traceback; the details are available with --verbose.
+            reason = f"HTTP {exc.response.status_code}" if exc.response is not None else type(exc).__name__
+            logger.error(f"Could not get the categories from Actual ({reason}), importing without categories")
+            logger.debug("Details of the Actual error", exc_info=True)
+            return transactions
         except Exception:
             # Categories are a convenience: never block the import because of them.
             logger.exception("Categorization failed, importing without categories")
