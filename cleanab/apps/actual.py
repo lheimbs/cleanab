@@ -5,7 +5,7 @@ from typing import Literal
 
 import requests
 from logzero import logger
-from pydantic import BaseModel, ConfigDict, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from ..classifier.base import Example
 from ..classifier.factory import build_classifier
@@ -24,10 +24,18 @@ class CategorizeConfig(BaseModel):
     model: Literal["light", "full"] = "light"
     history_since: date = date(2020, 1, 1)
     history_until: date | None = None
-    min_confidence: float = 0.5
+    min_confidence: float = Field(0.5, ge=0, le=1)
     assign_new_payees: bool = False
-    new_payee_min_confidence: float = 0.8
+    new_payee_min_confidence: float = Field(0.8, ge=0, le=1)
     descriptions: dict[str, str] = {}
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.history_until and self.history_until < self.history_since:
+            raise ValueError("history_until must not be before history_since")
+        if self.descriptions and self.model != "full":
+            raise ValueError("descriptions are only used by model: full")
+        return self
 
 
 class ActualAppConfig(BaseAppConfig):
@@ -65,33 +73,53 @@ class ActualApp(BaseApp):
         response.raise_for_status()
         return response.json()["data"]
 
-    def _load_reference_data(self, since: date, until: date | None):
-        """Return (category name -> id, history examples, imported_ids already in Actual)."""
+    def _transactions(self, account_id: str, since: date, until: date | None = None) -> list[dict]:
+        params = {"since_date": since.isoformat()}
+        if until:
+            params["until_date"] = until.isoformat()
+        return self._get(f"/accounts/{account_id}/transactions", **params)
+
+    def _category_labels(self) -> dict[str, str]:
+        """Return category id -> label. Names shared by several categories (in different groups) get the id appended."""
         category_list = self._get("/categories")
-        category_ids = {c["name"]: c["id"] for c in category_list}
-        names = {c["id"]: c["name"] for c in category_list}
+        counts: dict[str, int] = {}
+        for c in category_list:
+            counts[c["name"]] = counts.get(c["name"], 0) + 1
+        return {c["id"]: c["name"] if counts[c["name"]] == 1 else f"{c['name']} ({c['id']})" for c in category_list}
+
+    def _load_history(self, labels: dict[str, str], since: date, until: date | None) -> list[Example]:
+        """Return the categorized transactions in Actual, oldest first, as training examples."""
         payees = {p["id"]: p["name"] for p in self._get("/payees")}
         history: list[Example] = []
-        existing: set[str] = set()
         for account_id in self.config.actual_account_ids:
-            params = {"since_date": since.isoformat()}
-            if until:
-                params["until_date"] = until.isoformat()
-            for tx in self._get(f"/accounts/{account_id}/transactions", **params):
-                if tx.get("imported_id"):
-                    existing.add(tx["imported_id"])
-                category = names.get(tx.get("category")) if tx.get("category") else None
+            for tx in self._transactions(account_id, since, until):
+                category = labels.get(tx.get("category")) if tx.get("category") else None
                 if not category or tx.get("transfer_id") or tx.get("subtransactions"):
                     continue
                 history.append(
                     Example(
-                        payee=payees.get(tx.get("payee"), "") or tx.get("imported_payee") or "",
+                        # The bank's payee name, as sent by cleanab, so it matches new transactions even when the
+                        # payee was renamed in Actual; manually entered transactions only have the Actual name.
+                        payee=tx.get("imported_payee") or payees.get(tx.get("payee"), "") or "",
                         purpose=tx.get("notes") or "",
                         category=category,
                         date=date.fromisoformat(tx["date"]),
                     )
                 )
-        return category_ids, sorted(history, key=lambda e: e.date), existing
+        return sorted(history, key=lambda e: e.date)
+
+    def _existing_imported_ids(self, transactions: tuple) -> set[str]:
+        """imported_ids already in Actual for the period of the incoming transactions, regardless of history dates."""
+        dates = [date.fromisoformat(t["date"]) for t in transactions if t.get("date")]
+        if not dates:
+            return set()
+        since = min(dates)
+        return {
+            tx["imported_id"]
+            for account_id in self.config.actual_account_ids
+            for tx in self._transactions(account_id, since)
+            if tx.get("imported_id")
+        }
 
     def prepare_transactions(self, transactions: tuple) -> tuple:
         settings = self.config.categorize
@@ -106,19 +134,23 @@ class ActualApp(BaseApp):
 
     def _categorize(self, transactions: tuple) -> tuple:
         settings = self.config.categorize
-        category_ids, history, existing = self._load_reference_data(settings.history_since, settings.history_until)
+        labels = self._category_labels()
+        history = self._load_history(labels, settings.history_since, settings.history_until)
         if not history:
             logger.warning("No categorized transactions found in Actual, skipping categorization")
             return transactions
+        existing = self._existing_imported_ids(transactions)
+        category_ids = {label: cid for cid, label in labels.items()}
         classifier = build_classifier(settings.model, settings.descriptions)
         classifier.fit(history)
-        categories = sorted({e.category for e in history if e.category in category_ids})
+        categories = sorted({e.category for e in history})
 
         assigned = suggested = 0
         for transaction in transactions:
             if transaction.get("imported_id") in existing:
                 continue  # already in Actual: never touch what is there
-            example = Example(payee=transaction["payee_name"], purpose=transaction.get("notes", ""))
+            payee = transaction.get("imported_payee") or transaction["payee_name"]
+            example = Example(payee=payee, purpose=transaction.get("notes") or "")
             prediction = classifier.predict(example, categories)
             if prediction.category is None:
                 continue
@@ -148,12 +180,7 @@ class ActualApp(BaseApp):
         """
         url = str(self.config.actual_api_url).rstrip("/")
         sync_id = self.config.actual_sync_id
-        headers = {
-            "x-api-key": self.config.actual_api_key,
-            "accept": "application/json",
-        }
-        if self.config.actual_encryption_password:
-            headers["budget-encryption-password"] = self.config.actual_encryption_password
+        headers = self._headers()
 
         # Each transaction has a key _account_id specifying the actual account id.
         # We need to split the transactions by account id to assign them correctly.
