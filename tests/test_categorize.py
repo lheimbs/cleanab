@@ -468,3 +468,21 @@ def test_failed_full_run_logs_assignments_once(monkeypatch):
     app, _ = make_app(monkeypatch, HISTORY, model="full")
     app.prepare_transactions((new_tx("Grocer", imported_id="a"), new_tx("Totally New Shop", imported_id="b")))
     assert sum(line.startswith("Category Food") for line in infos) == 1
+
+
+def test_part_of_manual_split_blocks_matching_import(monkeypatch):
+    manual = {"date": "2024-05-04", "payee": "p-x", "amount": -900, "category": None, "is_parent": True}
+    manual["subtransactions"] = [{"amount": -500, "transfer_id": "t"}, {"amount": -400}]
+    app, _ = make_app(monkeypatch, [*HISTORY, manual])
+    tx = {**new_tx("Grocer"), "amount": -500}
+    app.prepare_transactions((tx,))
+    assert "category" not in tx
+
+
+def test_hidden_duplicate_name_does_not_rename_visible_category(monkeypatch):
+    app, fake = make_app(monkeypatch, HISTORY)
+    fake.data["/categories"] = [*CATEGORIES, {"id": "c-old-food", "name": "Food", "hidden": True}]
+    labels, hidden = app._category_labels()
+    assert labels["c-food"] == "Food"
+    assert labels["c-old-food"] == "Food (c-old-food)"
+    assert hidden == {"Food (c-old-food)"}

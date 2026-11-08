@@ -100,7 +100,7 @@ apps:
 - Actual rules that check "category is empty" no longer match transactions cleanab has given a category.
 - Off-budget accounts are left alone (nothing is learned from them or assigned to them), and hidden categories (or
   categories in a hidden group) are never assigned. Transfers and split transactions are not learned from. Payees that
-  appear in transfers since `history_since`, and transactions Actual could match to a transfer or split you entered by hand (same amount,
+  appear in transfers since `history_since` (also transfers to off-budget accounts), and transactions Actual could match to a transfer or split you entered by hand (same amount,
   up to 7 days apart), never get a category.
 - Transactions without a payee name are never treated as a known payee.
 - With `model: full`, if the model cannot be loaded (not installed, download failed), the `light` model is used.

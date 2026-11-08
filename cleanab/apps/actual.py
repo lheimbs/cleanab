@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal
@@ -98,16 +99,22 @@ class ActualApp(BaseApp):
     def _category_labels(self) -> tuple[dict[str, str], set[str]]:
         """Return (category id -> label, labels of hidden categories).
 
-        Names shared by several categories (in different groups) get the id appended.
+        Visible categories keep their name unless several visible ones share it (in different groups); those, and
+        hidden categories whose name is taken, get the id appended.
         """
         category_list = self._get("/categories")
-        counts: dict[str, int] = {}
-        for c in category_list:
-            counts[c["name"]] = counts.get(c["name"], 0) + 1
-        labels = {c["id"]: c["name"] if counts[c["name"]] == 1 else f"{c['name']} ({c['id']})" for c in category_list}
         hidden_groups = self._hidden_group_ids()
-        hidden = {labels[c["id"]] for c in category_list if c.get("hidden") or c.get("group_id") in hidden_groups}
-        return labels, hidden
+        hidden_ids = {c["id"] for c in category_list if c.get("hidden") or c.get("group_id") in hidden_groups}
+        visible = Counter(c["name"] for c in category_list if c["id"] not in hidden_ids)
+        hidden = Counter(c["name"] for c in category_list if c["id"] in hidden_ids)
+
+        def unique(c) -> bool:
+            if c["id"] in hidden_ids:
+                return visible[c["name"]] == 0 and hidden[c["name"]] == 1
+            return visible[c["name"]] == 1
+
+        labels = {c["id"]: c["name"] if unique(c) else f"{c['name']} ({c['id']})" for c in category_list}
+        return labels, {labels[i] for i in hidden_ids}
 
     def _hidden_group_ids(self) -> set[str]:
         """Ids of hidden category groups: all categories in them count as hidden."""
@@ -173,7 +180,11 @@ class ActualApp(BaseApp):
                 if tx.get("imported_id"):
                     imported_ids.add(tx["imported_id"])
                 elif tx.get("transfer_id") or tx.get("subtransactions") or tx.get("is_parent"):
-                    manual.setdefault((account_id, tx.get("amount")), []).append(date.fromisoformat(tx["date"]))
+                    day = date.fromisoformat(tx["date"])
+                    manual.setdefault((account_id, tx.get("amount")), []).append(day)
+                    # Actual may also match a single part of a split, e.g. a transfer inside it.
+                    for child in tx.get("subtransactions") or []:
+                        manual.setdefault((account_id, child.get("amount")), []).append(day)
         return imported_ids, manual
 
     def prepare_transactions(self, transactions: tuple) -> tuple:
