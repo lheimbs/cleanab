@@ -1,11 +1,11 @@
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict
 
 from .. import utils
 
 
-class FieldsEnum(str, Enum):
+class FieldsEnum(StrEnum):
     purpose = "purpose"
     applicant_name = "applicant_name"
 
