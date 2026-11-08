@@ -99,6 +99,13 @@ def test_existing_transactions_untouched(app):
     assert "category" not in tx
 
 
+def test_summary_explains_skips(app, monkeypatch):
+    messages = []
+    monkeypatch.setattr(actual.logger, "info", lambda msg, *a: messages.append(msg))
+    app.prepare_transactions((new_tx("Grocer", imported_id="already", day="2024-05-01"), new_tx("Totally New Shop")))
+    assert "Categories: 0 assigned, 1 only suggested; skipped 1 already in Actual" in messages
+
+
 def test_existing_transactions_outside_history_window_untouched(monkeypatch):
     txs = [*HISTORY, {"date": "2024-05-01", "payee": "p-grocer", "category": None, "imported_id": "already"}]
     app, fake = make_app(monkeypatch, txs, history_until=date(2023, 12, 31))

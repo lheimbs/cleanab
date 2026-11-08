@@ -241,23 +241,30 @@ class ActualApp(BaseApp):
         assignments: list[tuple[dict, str]] = []
         messages: list[str] = []
         suggested = 0
+        skipped: Counter[str] = Counter()
         for transaction in transactions:
             if transaction.get("_account_id") not in account_ids:
+                skipped["in an off-budget or unknown account"] += 1
                 continue  # off-budget (or unknown) account: no categories there
             if transaction.get("imported_id") in existing:
+                skipped["already in Actual"] += 1
                 continue  # already in Actual: never touch what is there
             if self._may_match_manual(transaction, manual):
+                skipped["possibly matching a manual transfer or split"] += 1
                 continue  # Actual may match this to a transfer or split entered by hand, which gets no category
             payee = transaction.get("imported_payee") or transaction["payee_name"]
             if normalize_text(payee) in transfer_payees:
+                skipped["from a transfer payee"] += 1
                 continue  # a transfer payee: Actual may match this to a transfer, which gets no category
             example = Example(payee=payee, purpose=transaction.get("notes") or "")
             known = classifier.knows(example)
             past = classifier.history_prediction(example, categories) if known else None
             if past is not None and past.category is None:
+                skipped["whose past categories are all hidden"] += 1
                 continue  # all its past categories are hidden
             prediction = classifier.predict(example, categories)
             if prediction.category is None:
+                skipped["without a prediction"] += 1
                 continue
             if past is not None:
                 # A payee seen before only gets a category it already had. If the model leans elsewhere (e.g. because
@@ -283,7 +290,10 @@ class ActualApp(BaseApp):
         for transaction, category_id in assignments:
             transaction["category"] = category_id
         assigned = len(assignments)
-        logger.info(f"Categories: {assigned} assigned, {suggested} only suggested")
+        summary = f"Categories: {assigned} assigned, {suggested} only suggested"
+        if skipped:
+            summary += "; skipped " + ", ".join(f"{count} {reason}" for reason, count in skipped.items())
+        logger.info(summary)
         return transactions
 
     @staticmethod
