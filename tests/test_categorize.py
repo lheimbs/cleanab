@@ -234,3 +234,32 @@ def test_transfers_splits_and_deleted_categories_are_not_learned(monkeypatch):
     app._get.data["/payees"] = payees
     (tx,) = app.prepare_transactions((new_tx("Other"),))
     assert "category" not in tx  # "Other" is unknown: only learned from skipped rows
+
+
+def test_known_payee_never_gets_a_category_it_did_not_have(monkeypatch):
+    # "Grocer" was only ever Food, but many similarly named payees are Bills: the n-gram model may say Bills.
+    txs = [history_tx(1, "p-grocer", "c-food")] + [
+        {**history_tx(i, None, "c-bills"), "imported_payee": f"Grocer Store {i}"} for i in range(2, 12)
+    ]
+    app, _ = make_app(monkeypatch, txs, min_confidence=0.0)
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert tx.get("category") in (None, "c-food")
+
+
+def test_category_reaches_the_import_request(app, monkeypatch):
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    sent = {}
+
+    class Response:
+        ok = True
+
+        def json(self):
+            return {"data": {"added": ["x"], "updated": []}}
+
+    def fake_post(url, headers, json, timeout):
+        sent.update(json)
+        return Response()
+
+    monkeypatch.setattr(actual.requests, "post", fake_post)
+    app.create_transactions([tx])
+    assert sent["transactions"][0]["category"] == "c-food"

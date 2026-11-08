@@ -166,7 +166,10 @@ def test_setup_does_not_probe_the_terminal(make_cleanab, monkeypatch):
 
 def test_prepare_transactions_runs_for_dry_run_and_import(make_cleanab, fints, monkeypatch):
     seen = []
-    monkeypatch.setattr(FakeApp, "prepare_transactions", lambda self, txs: seen.append(len(txs)) or txs, raising=False)
+    prepared = ("prepared",)
+    monkeypatch.setattr(FakeApp, "prepare_transactions", lambda self, txs: seen.append(len(txs)) or prepared)
     make_cleanab(apps=1, dry_run=True).run()
-    make_cleanab(apps=1).run()
+    cleanab = make_cleanab(apps=1)
+    cleanab.run()
     assert seen == [2, 2]
+    assert cleanab.config.get_apps()[0].created == [prepared]
