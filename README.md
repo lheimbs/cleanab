@@ -85,11 +85,12 @@ apps:
       min_confidence: 0.5     # known payees are assigned at or above this (0..1)
       assign_new_payees: false    # new payees are only logged as suggestions unless this is true
       new_payee_min_confidence: 0.8   # threshold for new payees, only used with assign_new_payees: true
-      # descriptions:         # optional, only with `model: full`
+      # descriptions:         # optional, only with `model: full`; keyed by category name ("Name (id)" if two share a name)
       #   Food: groceries, drugstores, bakeries, cafes
 ```
 
-- Transactions already in Actual (same `imported_id`) are never touched, so existing categories are not overwritten.
+- Transactions already in Actual (same `imported_id`, looked up from the earliest fetched date on) get no category from
+  cleanab, so existing categories are not overwritten.
   Actual may still match a new transaction to an uncategorized one you entered by hand (same amount, close date);
   that one then gets the suggested category, but a category that is already set is never replaced.
 - Payees seen before are assigned one of the categories they had before, picked using the payee name and purpose

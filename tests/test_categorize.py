@@ -236,12 +236,15 @@ def test_transfers_splits_and_deleted_categories_are_not_learned(monkeypatch):
     assert "category" not in tx  # "Other" is unknown: only learned from skipped rows
 
 
-def test_known_payee_never_gets_a_category_it_did_not_have(monkeypatch):
+@pytest.mark.parametrize("assign_new_payees", [False, True])
+def test_known_payee_never_gets_a_category_it_did_not_have(monkeypatch, assign_new_payees):
     # "Grocer" was only ever Food, but many similarly named payees are Bills: the n-gram model may say Bills.
     txs = [history_tx(1, "p-grocer", "c-food")] + [
         {**history_tx(i, None, "c-bills"), "imported_payee": f"Grocer Store {i}"} for i in range(2, 12)
     ]
-    app, _ = make_app(monkeypatch, txs, min_confidence=0.0)
+    app, _ = make_app(
+        monkeypatch, txs, min_confidence=0.0, assign_new_payees=assign_new_payees, new_payee_min_confidence=0.0
+    )
     (tx,) = app.prepare_transactions((new_tx("Grocer"),))
     assert tx.get("category") in (None, "c-food")
 

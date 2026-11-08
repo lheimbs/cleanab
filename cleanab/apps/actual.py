@@ -160,10 +160,15 @@ class ActualApp(BaseApp):
             prediction = classifier.predict(example, categories)
             if prediction.category is None:
                 continue
-            # A payee seen before is only assigned a category it already had; anything else is just a suggestion.
-            known = prediction.category in classifier.history_categories(example, categories)
-            threshold = settings.min_confidence if known else settings.new_payee_min_confidence
-            if (known or settings.assign_new_payees) and prediction.confidence >= threshold:
+            known = classifier.knows(example)
+            if known:
+                # A payee seen before is only assigned a category it already had; anything else is just a suggestion.
+                allowed = prediction.category in classifier.history_categories(example, categories)
+                threshold = settings.min_confidence
+            else:
+                allowed = settings.assign_new_payees
+                threshold = settings.new_payee_min_confidence
+            if allowed and prediction.confidence >= threshold:
                 assignments.append((transaction, category_ids[prediction.category]))
                 logger.info(f"Category {prediction.category} ({prediction.confidence:.2f}): {example.payee}")
                 continue
