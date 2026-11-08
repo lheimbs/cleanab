@@ -28,6 +28,7 @@ class FakeActual:
             "/categories": categories,
             "/payees": payees,
             "/accounts": [{"id": "acc", "offbudget": False}, {"id": "savings", "offbudget": True}],
+            "/categorygroups": [],
         }
         self.calls = []
 
@@ -305,3 +306,36 @@ def test_hidden_categories_are_never_assigned(monkeypatch):
     fake.data["/categories"] = [{"id": "c-food", "name": "Food", "hidden": True}, {"id": "c-bills", "name": "Bills"}]
     (tx,) = app.prepare_transactions((new_tx("Grocer"),))
     assert tx.get("category") != "c-food"
+
+
+def test_categories_in_hidden_groups_are_never_assigned(monkeypatch):
+    app, fake = make_app(monkeypatch, HISTORY)
+    fake.data["/categories"] = [
+        {"id": "c-food", "name": "Food", "group_id": "g-old"},
+        {"id": "c-bills", "name": "Bills"},
+    ]
+    fake.data["/categorygroups"] = [{"id": "g-old", "hidden": True}]
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert tx.get("category") != "c-food"
+
+
+def test_known_payee_with_only_hidden_categories_is_not_suggested(monkeypatch):
+    app, fake = make_app(monkeypatch, HISTORY)
+    fake.data["/categories"] = [{"id": "c-food", "name": "Food", "hidden": True}, {"id": "c-bills", "name": "Bills"}]
+    infos = []
+    monkeypatch.setattr(actual.logger, "info", infos.append)
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert "category" not in tx
+    assert not any("None" in line for line in infos)
+
+
+def test_stale_account_id_does_not_disable_the_others(monkeypatch):
+    app, fake = make_app(monkeypatch, HISTORY)
+    app.config.actual_account_ids = ["acc", "deleted"]
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert tx["category"] == "c-food"
+    assert not any(path == "/accounts/deleted/transactions" for path, _ in fake.calls)
+
+
+def test_empty_categorize_section_is_allowed():
+    assert not actual.Config(**BASE, categorize=None).categorize.enabled

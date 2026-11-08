@@ -5,7 +5,7 @@ from typing import Literal
 
 import requests
 from logzero import logger
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from ..classifier.base import Example
 from ..classifier.factory import build_classifier
@@ -58,6 +58,11 @@ class ActualAppConfig(BaseAppConfig):
     actual_encryption_password: str | None = None
     categorize: CategorizeConfig = CategorizeConfig()
 
+    @field_validator("categorize", mode="before")
+    @classmethod
+    def _empty_categorize(cls, value):
+        return {} if value is None else value  # a bare `categorize:` with everything commented out
+
 
 class ActualApp(BaseApp):
     is_written_account = False
@@ -99,16 +104,28 @@ class ActualApp(BaseApp):
         for c in category_list:
             counts[c["name"]] = counts.get(c["name"], 0) + 1
         labels = {c["id"]: c["name"] if counts[c["name"]] == 1 else f"{c['name']} ({c['id']})" for c in category_list}
-        hidden = {labels[c["id"]] for c in category_list if c.get("hidden")}
+        hidden_groups = self._hidden_group_ids()
+        hidden = {labels[c["id"]] for c in category_list if c.get("hidden") or c.get("group_id") in hidden_groups}
         return labels, hidden
+
+    def _hidden_group_ids(self) -> set[str]:
+        """Ids of hidden category groups: all categories in them count as hidden."""
+        try:
+            groups = self._get("/categorygroups")
+        except requests.RequestException:
+            logger.warning("Could not load category groups, only categories hidden themselves are skipped")
+            return set()
+        return {g["id"] for g in groups if g.get("hidden")}
 
     def _budget_account_ids(self) -> list[str]:
         """The configured accounts that are on budget; Actual does not use categories in off-budget accounts."""
-        offbudget = {a["id"] for a in self._get("/accounts") if a.get("offbudget")}
-        skipped = [a for a in self.config.actual_account_ids if a in offbudget]
-        if skipped:
-            logger.info(f"Not categorizing off-budget accounts: {', '.join(skipped)}")
-        return [a for a in self.config.actual_account_ids if a not in offbudget]
+        accounts = {a["id"]: a for a in self._get("/accounts")}
+        configured = self.config.actual_account_ids
+        if missing := [a for a in configured if a not in accounts]:
+            logger.warning(f"Accounts not found in Actual, not categorized: {', '.join(missing)}")
+        if offbudget := [a for a in configured if accounts.get(a, {}).get("offbudget")]:
+            logger.info(f"Not categorizing off-budget accounts: {', '.join(offbudget)}")
+        return [a for a in configured if a in accounts and not accounts[a].get("offbudget")]
 
     def _load_history(
         self, account_ids: list[str], labels: dict[str, str], since: date, until: date | None
@@ -203,6 +220,8 @@ class ActualApp(BaseApp):
                 past = classifier.history_prediction(example, categories)
                 if prediction.category not in (past.scores or {}):
                     prediction = past
+                if prediction.category is None:
+                    continue  # all its past categories are hidden
                 allowed = prediction.category is not None
                 threshold = settings.min_confidence
             else:
