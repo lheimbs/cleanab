@@ -35,9 +35,9 @@ class HybridClassifier:
         """True if the history contains this payee."""
         return self.exact.knows(example)
 
-    def history_categories(self, example: Example, categories: list[str]) -> set[str]:
-        """Categories (of those offered) this payee had in the history; empty for a new payee."""
-        return set(self.exact.predict(example, categories).scores or {})
+    def history_prediction(self, example: Example, categories: list[str]) -> Prediction:
+        """The payee's majority category in the history (scores: all its past categories); empty for a new payee."""
+        return self.exact.predict(example, categories)
 
     def predict(self, example: Example, categories: list[str]) -> Prediction:
         seen = self.exact.predict(example, categories)

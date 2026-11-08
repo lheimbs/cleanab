@@ -94,13 +94,15 @@ apps:
   Actual may still match a new transaction to an uncategorized one you entered by hand (same amount, close date);
   that one then gets the suggested category, but a category that is already set is never replaced.
 - Payees seen before are assigned one of the categories they had before, picked using the payee name and purpose
-  text; a different category, and any category for a new payee, is only logged as a suggestion by default. Payees are matched on the bank's name, so renaming a payee in Actual does not hide its history.
+  text (their most common one if the model would pick something else); new payees only get a logged suggestion by
+  default.
+- Actual rules that check "category is empty" no longer match transactions cleanab has given a category. Payees are matched on the bank's name, so renaming a payee in Actual does not hide its history.
 - Without `history_until`, categories cleanab assigned in earlier runs are learned from too, so a wrong guess you did
   not correct can repeat. Set `history_until` to the end of the period you have checked to avoid that.
 - Try it with `--dry-run`: the log shows `Category …` and `Suggested category …` lines; with `--verbose` the
   intermediary with the category ids is logged too.
-- `light` needs `uv sync --extra ml-lite`. `full` needs `uv sync --group models` and downloads a
-  ~2.7 GB model on first use; the model runs locally and only once per new payee.
+- `light` needs `uv sync --extra ml-lite`. `full` needs `uv sync --extra ml-lite --group models` and downloads a
+  ~2.7 GB model on first use; the model runs locally, once per distinct new payee text in each run.
 - On one user's checked history, `light` got about 92% right overall and `full` about 94%
   (75% on never-seen payees, against 59% for `light`). See [experiments/README.md](experiments/README.md).
 

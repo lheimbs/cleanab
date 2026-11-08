@@ -246,7 +246,7 @@ def test_known_payee_never_gets_a_category_it_did_not_have(monkeypatch, assign_n
         monkeypatch, txs, min_confidence=0.0, assign_new_payees=assign_new_payees, new_payee_min_confidence=0.0
     )
     (tx,) = app.prepare_transactions((new_tx("Grocer"),))
-    assert tx.get("category") in (None, "c-food")
+    assert tx["category"] == "c-food"  # the payee's own history wins over similar payees
 
 
 def test_category_reaches_the_import_request(app, monkeypatch):

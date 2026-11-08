@@ -162,8 +162,12 @@ class ActualApp(BaseApp):
                 continue
             known = classifier.knows(example)
             if known:
-                # A payee seen before is only assigned a category it already had; anything else is just a suggestion.
-                allowed = prediction.category in classifier.history_categories(example, categories)
+                # A payee seen before only gets a category it already had: if the model leans elsewhere (e.g. because
+                # of the purpose text), fall back to the payee's majority category.
+                past = classifier.history_prediction(example, categories)
+                if prediction.category not in (past.scores or {}):
+                    prediction = past
+                allowed = prediction.category is not None
                 threshold = settings.min_confidence
             else:
                 allowed = settings.assign_new_payees
