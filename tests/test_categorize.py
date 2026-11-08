@@ -356,7 +356,7 @@ def test_full_model_failure_falls_back_to_light(monkeypatch):
     from cleanab.classifier import decider
 
     def broken(self):
-        raise RuntimeError("install the model extra")
+        raise decider.ModelUnavailable("install the model extra")
 
     monkeypatch.setattr(decider.DeciderClassifier, "_load", broken)
     app, _ = make_app(monkeypatch, HISTORY, model="full")
@@ -364,3 +364,63 @@ def test_full_model_failure_falls_back_to_light(monkeypatch):
     app.prepare_transactions((known, new))
     assert known["category"] == "c-food"
     assert "category" not in new
+
+
+@pytest.mark.parametrize("placeholder", ["Unknown", "Unnamed"])
+def test_payee_less_transactions_are_not_one_known_payee(monkeypatch, placeholder):
+    txs = [*HISTORY, *(history_tx(i, None, "c-bills", imported_payee=placeholder) for i in range(20, 26))]
+    app, _ = make_app(monkeypatch, txs)
+    tx = {**new_tx(placeholder), "imported_payee": placeholder, "notes": "card payment"}
+    (tx,) = app.prepare_transactions((tx,))
+    assert "category" not in tx  # treated as a new payee: only suggested by default
+
+
+def test_possible_match_with_manual_transfer_gets_no_category(monkeypatch):
+    manual = {"date": "2024-05-04", "payee": "p-x", "amount": -500, "transfer_id": "t", "category": None}
+    app, _ = make_app(monkeypatch, [*HISTORY, manual])
+    near = {**new_tx("Grocer", imported_id="a"), "amount": -500}
+    other_amount = {**new_tx("Grocer", imported_id="b"), "amount": -499}
+    app.prepare_transactions((near, other_amount))
+    assert "category" not in near
+    assert other_amount["category"] == "c-food"
+
+
+def test_category_groups_failure_only_warns(monkeypatch):
+    import requests
+
+    app, fake = make_app(monkeypatch, HISTORY)
+    original = fake.__call__
+
+    def get(path, **params):
+        if path == "/categorygroups":
+            raise requests.HTTPError("404")
+        return original(path, **params)
+
+    monkeypatch.setattr(app, "_get", get)
+    (tx,) = app.prepare_transactions((new_tx("Grocer"),))
+    assert tx["category"] == "c-food"
+
+
+def test_full_model_does_not_retry_on_other_errors(monkeypatch):
+    app, fake = make_app(monkeypatch, HISTORY, model="full")
+    calls = []
+
+    def boom(path, **params):
+        calls.append(path)
+        raise RuntimeError("actual down")
+
+    monkeypatch.setattr(app, "_get", boom)
+    txs = (new_tx("Grocer"),)
+    assert app.prepare_transactions(txs) == txs
+    assert calls.count("/accounts") == 1
+
+
+def test_description_warnings_only_with_full(monkeypatch):
+    from cleanab.classifier import decider
+
+    monkeypatch.setattr(decider.DeciderClassifier, "predict", lambda self, ex, cats: decider.Prediction(None))
+    warnings = []
+    monkeypatch.setattr(actual.logger, "warning", warnings.append)
+    app, _ = make_app(monkeypatch, HISTORY, model="full", descriptions={"Fod": "typo", "Food": "groceries"})
+    app.prepare_transactions((new_tx("Grocer"),))
+    assert any("unknown categories" in w and "Fod" in w for w in warnings)

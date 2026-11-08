@@ -10,6 +10,10 @@ DEFAULT_FILE = "decider-4b-v3-Q4_K_M.gguf"
 MIN_OPTIONS, MAX_OPTIONS = 2, 255
 
 
+class ModelUnavailable(RuntimeError):
+    """The decider model could not be loaded (not installed, download failed, ...)."""
+
+
 class DeciderClassifier:
     """Typed single-choice decision over the category names; ignores history."""
 
@@ -34,8 +38,11 @@ class DeciderClassifier:
             try:
                 from decider.infer import Decider
             except ImportError as exc:
-                raise RuntimeError("install the model extra: uv sync --group models (decider-ai[gguf])") from exc
-            self._decider = Decider(self.repo, gguf_file=self.gguf_file) if self.gguf_file else Decider(self.repo)
+                raise ModelUnavailable("install the model extra: uv sync --group models (decider-ai[gguf])") from exc
+            try:
+                self._decider = Decider(self.repo, gguf_file=self.gguf_file) if self.gguf_file else Decider(self.repo)
+            except Exception as exc:
+                raise ModelUnavailable(f"could not load {self.repo}: {exc}") from exc
         return self._decider
 
     def _question(self, categories: list[str]) -> str:

@@ -99,16 +99,21 @@ apps:
   new payees only get a logged suggestion by default.
 - Actual rules that check "category is empty" no longer match transactions cleanab has given a category.
 - Off-budget accounts are left alone (nothing is learned from them or assigned to them), and hidden categories (or
-  categories in a hidden group) are never assigned. Transfers and split transactions are not learned from, and payees
-  that appear in transfers never get a category.
+  categories in a hidden group) are never assigned. Transfers and split transactions are not learned from. Payees that
+  appear in transfers, and transactions Actual could match to a transfer or split you entered by hand (same amount,
+  up to 7 days apart), never get a category.
+- Transactions without a payee name are never treated as a known payee.
 - With `model: full`, if the model cannot be loaded (not installed, download failed), the `light` model is used.
-- Unknown keys in the `actual` section are ignored with a warning; unknown keys under `categorize` are an error. Payees are matched on the bank's name, so renaming a payee in Actual does not hide its history.
+- Payees are matched on the bank's name, so renaming a payee in Actual does not hide its history.
+- Unknown keys in the `actual` section are ignored with a warning; unknown keys under `categorize` are an error.
 - Without `history_until`, categories cleanab assigned in earlier runs are learned from too, so a wrong guess you did
   not correct can repeat. Set `history_until` to the end of the period you have checked to avoid that.
+- Categorizing reads from Actual (categories, payees, recent transactions) also with `--dry-run` and `--test`; it
+  never writes there in those modes.
 - Try it with `--dry-run`: the log shows `Category …` and `Suggested category …` lines; with `--verbose` the
   intermediary with the category ids is logged too.
 - `light` needs `uv sync --extra ml-lite`. `full` needs `uv sync --extra ml-lite --group models` and downloads a
-  ~2.7 GB model on first use; the model runs locally, once per distinct new payee text in each run.
+  ~2.7 GB model on first use; the model runs locally, once per distinct new payee and purpose text in each run.
 - On one user's checked history, `light` got about 92% right overall and `full` about 94%
   (75% on never-seen payees, against 59% for `light`). See [experiments/README.md](experiments/README.md).
 

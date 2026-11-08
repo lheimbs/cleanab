@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -8,12 +8,15 @@ from logzero import logger
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from ..classifier.base import Example
+from ..classifier.decider import ModelUnavailable
 from ..classifier.factory import build_classifier
 from ..classifier.normalize import normalize_text
 from ..models import AccountConfig, FintsTransaction
 from .base import BaseApp, BaseAppConfig
 
 REQUEST_TIMEOUT = 30
+# Actual matches imported transactions to existing ones with the same amount up to this many days apart.
+MATCH_WINDOW = timedelta(days=7)
 
 
 class CategorizeConfig(BaseModel):
@@ -161,18 +164,25 @@ class ActualApp(BaseApp):
         transfer_payees.discard("")
         return sorted(history, key=lambda e: e.date), transfer_payees
 
-    def _existing_imported_ids(self, account_ids: list[str], transactions: tuple) -> set[str]:
-        """imported_ids already in Actual for the period of the incoming transactions, regardless of history dates."""
+    def _existing(self, account_ids: list[str], transactions: tuple) -> tuple[set[str], dict[tuple, list[date]]]:
+        """What is already in Actual around the incoming transactions, regardless of history dates.
+
+        Returns the imported_ids, and (account, amount) -> dates of transfers and splits entered by hand: Actual may
+        match an import to those (same amount, a few days apart) and would then fill in their empty category.
+        """
         dates = [date.fromisoformat(t["date"]) for t in transactions if t.get("date")]
         if not dates:
-            return set()
-        since = min(dates)
-        return {
-            tx["imported_id"]
-            for account_id in account_ids
-            for tx in self._transactions(account_id, since)
-            if tx.get("imported_id")
-        }
+            return set(), {}
+        since = min(dates) - MATCH_WINDOW
+        imported_ids: set[str] = set()
+        manual: dict[tuple, list[date]] = {}
+        for account_id in account_ids:
+            for tx in self._transactions(account_id, since):
+                if tx.get("imported_id"):
+                    imported_ids.add(tx["imported_id"])
+                elif tx.get("transfer_id") or tx.get("subtransactions") or tx.get("is_parent"):
+                    manual.setdefault((account_id, tx.get("amount")), []).append(date.fromisoformat(tx["date"]))
+        return imported_ids, manual
 
     def prepare_transactions(self, transactions: tuple) -> tuple:
         settings = self.config.categorize
@@ -181,11 +191,9 @@ class ActualApp(BaseApp):
         try:
             try:
                 return self._categorize(transactions, settings.model)
-            except Exception:
-                if settings.model != "full":
-                    raise
+            except ModelUnavailable as exc:
                 # e.g. the `models` group is not installed or the model download failed: still use the light model.
-                logger.exception("The full model failed, using the light model instead")
+                logger.warning(f"The full model is unavailable ({exc}), using the light model instead")
                 return self._categorize(transactions, "light")
         except Exception:
             # Categories are a convenience: never block the import because of them.
@@ -219,7 +227,7 @@ class ActualApp(BaseApp):
             if unused := sorted((described & set(labels.values())) - learned - hidden):
                 logger.warning(f"Categories without categorized transactions cannot be suggested: {', '.join(unused)}")
 
-        existing = self._existing_imported_ids(account_ids, transactions)
+        existing, manual = self._existing(account_ids, transactions)
         category_ids = {label: cid for cid, label in labels.items()}
         classifier = build_classifier(model, settings.descriptions)
         classifier.fit(history)
@@ -232,22 +240,24 @@ class ActualApp(BaseApp):
                 continue  # off-budget (or unknown) account: no categories there
             if transaction.get("imported_id") in existing:
                 continue  # already in Actual: never touch what is there
+            if self._may_match_manual(transaction, manual):
+                continue  # Actual may match this to a transfer or split entered by hand, which gets no category
             payee = transaction.get("imported_payee") or transaction["payee_name"]
+            if normalize_text(payee) in transfer_payees:
+                continue  # a transfer payee: Actual may match this to a transfer, which gets no category
             example = Example(payee=payee, purpose=transaction.get("notes") or "")
+            known = classifier.knows(example)
+            past = classifier.history_prediction(example, categories) if known else None
+            if past is not None and past.category is None:
+                continue  # all its past categories are hidden
             prediction = classifier.predict(example, categories)
             if prediction.category is None:
                 continue
-            if normalize_text(payee) in transfer_payees:
-                continue  # a transfer payee: Actual may match this to a transfer, which gets no category
-            known = classifier.knows(example)
-            if known:
+            if past is not None:
                 # A payee seen before only gets a category it already had: if the model leans elsewhere (e.g. because
                 # of the purpose text), fall back to the payee's majority category.
-                past = classifier.history_prediction(example, categories)
                 if prediction.category not in (past.scores or {}):
                     prediction = past
-                if prediction.category is None:
-                    continue  # all its past categories are hidden
                 allowed = True
                 threshold = settings.min_confidence
             else:
@@ -266,6 +276,14 @@ class ActualApp(BaseApp):
         assigned = len(assignments)
         logger.info(f"Categories: {assigned} assigned, {suggested} only suggested")
         return transactions
+
+    @staticmethod
+    def _may_match_manual(transaction: dict, manual: dict[tuple, list[date]]) -> bool:
+        if not transaction.get("date"):
+            return False
+        day = date.fromisoformat(transaction["date"])
+        candidates = manual.get((transaction.get("_account_id"), transaction.get("amount")), [])
+        return any(abs(day - other) <= MATCH_WINDOW for other in candidates)
 
     def create_transactions(self, transactions: list[dict]) -> tuple[list, list]:
         """Create transactions in Actual.
